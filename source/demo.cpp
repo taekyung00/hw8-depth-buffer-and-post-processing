@@ -7,19 +7,69 @@
  * \copyright DigiPen Institute of Technology
  */
 
-
+#include "FPS.hpp"
 #include "FarmSceneRenderer.hpp"
+#include "ImmediateRenderer2D.hpp"
 #include "OffscreenFramebuffer.hpp"
 #include "Path.hpp"
 #include "PostProcessingPipeline.hpp"
+#include "Random.hpp"
 #include "Shader.hpp"
+#include "GL.h"
 #include <GL/glew.h>
 #include <SDL.h>
+#include <algorithm>
 #include <array>
 #include <imgui.h>
 #include <iostream>
+#include <memory>
+#include <stb_image.h>
 #include <string>
 #include <vector>
+#include <random>
+
+// Simple vector types
+struct dvec2
+{
+    double x, y;
+};
+
+struct ivec2
+{
+    int x, y;
+};
+
+// rendering variables
+std::unique_ptr<IRenderer2D> gRenderer;
+
+// background scene variables
+static constexpr ivec2 BACKGROUND_FRAME_SIZE{ 1920, 1080 };
+static constexpr int    NUM_BACKGROUND_LAYERS = 8;
+struct BackgroundLayer
+{
+    OpenGL::Handle texture;
+    float depth;
+};
+std::array<BackgroundLayer, NUM_BACKGROUND_LAYERS> gBackgroundLayers;
+void BackgroundRender();
+void BackgroundSetup();
+
+// duck variables
+static constexpr ivec2 DUCK_FRAME_SIZE{ 256, 256 };
+struct Duck
+{
+    dvec2  position;
+    float r, g, b, a; // tint color
+    float depth;
+};
+std::vector<Duck> gDucks;
+OpenGL::Handle    gDuckTexture = 0;
+void DuckRender();
+void DuckSetup();
+Duck CreateRandomDuck();
+
+util::FPS gFPSTracker;
+Uint32    gLastTicks = 0;
 
 extern int gWidth;
 extern int gHeight;
@@ -51,6 +101,9 @@ float gChromaticAberrationMouseX = 0.5f;
 float gChromaticAberrationMouseY = 0.5f;
 int   gPixelSize                 = 5;
 
+// Forward declarations
+
+
 void setupScreenTriangle()
 {
     struct ScreenVertex
@@ -67,31 +120,55 @@ void setupScreenTriangle()
 
     gScreenVertexCount = static_cast<GLsizei>(std::ssize(vertices));
 
-    glGenBuffers(1, &gScreenVBO);
-    glBindBuffer(GL_ARRAY_BUFFER, gScreenVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    GL::GenBuffers(1, &gScreenVBO);
+    GL::BindBuffer(GL_ARRAY_BUFFER, gScreenVBO);
+    GL::BufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    GL::BindBuffer(GL_ARRAY_BUFFER, 0);
 
-    glGenVertexArrays(1, &gScreenVAO);
-    glBindVertexArray(gScreenVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, gScreenVBO);
-
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(ScreenVertex), nullptr);
-    glVertexAttribDivisor(0, 0);
+    GL::GenVertexArrays(1, &gScreenVAO);
+    GL::BindVertexArray(gScreenVAO);
+    GL::BindBuffer(GL_ARRAY_BUFFER, gScreenVBO);
 
 
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(ScreenVertex), reinterpret_cast<void*>(2 * sizeof(float)));
-    glVertexAttribDivisor(1, 0);
+    GL::EnableVertexAttribArray(0);
+    GL::VertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(ScreenVertex), nullptr);
+    GL::VertexAttribDivisor(0, 0);
 
-    glBindVertexArray(0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    GL::EnableVertexAttribArray(1);
+    GL::VertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(ScreenVertex), reinterpret_cast<void*>(2 * sizeof(float)));
+    GL::VertexAttribDivisor(1, 0);
+
+    GL::BindVertexArray(0);
+    GL::BindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 void demo_setup()
 {
+    // Initialize renderer
+    gRenderer = std::make_unique<ImmediateRenderer2D>();
+    gRenderer->Init();
+
+    BackgroundSetup();
+    DuckSetup();
+    GL::Enable(GL_BLEND);
+    GL::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    GL::Enable(GL_DEPTH_TEST);
+    GL::DepthFunc(GL_LESS); // set depth function to less
+    GL::DepthMask(GL_TRUE); // enable depth write
+
+    constexpr int ADAPTIVE_VSYNC = -1;
+    constexpr int VSYNC          = 1;
+    if (const auto result = SDL_GL_SetSwapInterval(ADAPTIVE_VSYNC); result != 0)
+    {
+        SDL_GL_SetSwapInterval(VSYNC);
+    }
+    
+
+    // Initialize FPS tracking
+    gLastTicks = SDL_GetTicks();
+
+    // farm and post-processing initialization
     gFarmScene.Initialize();
 
     const auto use_msaa = gUseMSAA ? OffscreenFramebuffer::MSAA::True : OffscreenFramebuffer::MSAA::False;
@@ -121,39 +198,37 @@ void demo_setup()
             }));
     }
 
-    //{
-    //    const std::filesystem::path gamma_vert   = assets::locate_asset("Assets/shaders/simple.vert");
-    //    const std::filesystem::path gamma_frag   = assets::locate_asset("Assets/shaders/gamma-correct.frag");
-    //    auto                        gamma_shader = OpenGL::CreateShader(gamma_vert, gamma_frag);
+    {
+       const std::filesystem::path gamma_vert   = assets::locate_asset("Assets/shaders/simple.vert");
+       const std::filesystem::path gamma_frag   = assets::locate_asset("Assets/shaders/gamma-correct.frag");
+       auto                        gamma_shader = OpenGL::CreateShader(gamma_vert, gamma_frag);
 
-    //    gPostProcessing.AddEffect(PostProcessingEffect(
-    //        "Gamma Correction", PostProcessingEffect::Enable::True, gamma_shader, [](const OpenGL::CompiledShader& shader) { glUniform1f(shader.UniformLocations.at("uGamma"), gGammaValue); }));
-    //}
+       gPostProcessing.AddEffect(PostProcessingEffect(
+           "Gamma Correction", PostProcessingEffect::Enable::False, gamma_shader, [](const OpenGL::CompiledShader& shader) { glUniform1f(shader.UniformLocations.at("uGamma"), gGammaValue); }));
+    }
 
-    //{
-    //    const std::filesystem::path chroma_vert   = assets::locate_asset("Assets/shaders/simple.vert");
-    //    const std::filesystem::path chroma_frag   = assets::locate_asset("Assets/shaders/chromatic-aberration.frag");
-    //    auto                        chroma_shader = OpenGL::CreateShader(chroma_vert, chroma_frag);
+    {
+       const std::filesystem::path chroma_vert   = assets::locate_asset("Assets/shaders/simple.vert");
+       const std::filesystem::path chroma_frag   = assets::locate_asset("Assets/shaders/chromatic-aberration.frag");
+       auto                        chroma_shader = OpenGL::CreateShader(chroma_vert, chroma_frag);
 
-    //    gPostProcessing.AddEffect(PostProcessingEffect(
-    //        "Chromatic Aberration", PostProcessingEffect::Enable::True, chroma_shader,
-    //        [](const OpenGL::CompiledShader& shader) { glUniform2f(shader.UniformLocations.at("uMouseFocusPoint"), gChromaticAberrationMouseX, gChromaticAberrationMouseY); }));
-    //}
-    //{
-    //    const std::filesystem::path pixel_vert   = assets::locate_asset("Assets/shaders/simple.vert");
-    //    const std::filesystem::path pixel_frag   = assets::locate_asset("Assets/shaders/pixelize.frag");
-    //    auto                        pixel_shader = OpenGL::CreateShader(pixel_vert, pixel_frag);
+       gPostProcessing.AddEffect(PostProcessingEffect(
+           "Chromatic Aberration", PostProcessingEffect::Enable::False, chroma_shader,
+           [](const OpenGL::CompiledShader& shader) { glUniform2f(shader.UniformLocations.at("uMouseFocusPoint"), gChromaticAberrationMouseX, gChromaticAberrationMouseY); }));
+    }
+    {
+       const std::filesystem::path pixel_vert   = assets::locate_asset("Assets/shaders/simple.vert");
+       const std::filesystem::path pixel_frag   = assets::locate_asset("Assets/shaders/pixelize.frag");
+       auto                        pixel_shader = OpenGL::CreateShader(pixel_vert, pixel_frag);
 
-    //    gPostProcessing.AddEffect(PostProcessingEffect(
-    //        "Pixelization", PostProcessingEffect::Enable::True, pixel_shader, [](const OpenGL::CompiledShader& shader) { glUniform1i(shader.UniformLocations.at("pixelSize"), gPixelSize); })); // must be odd
-    //}
-
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+       gPostProcessing.AddEffect(PostProcessingEffect(
+           "Pixelization", PostProcessingEffect::Enable::False, pixel_shader, [](const OpenGL::CompiledShader& shader) { glUniform1i(shader.UniformLocations.at("pixelSize"), gPixelSize); })); 
+        //    must be odd
+    }
 
     if (gUseMSAA)
     {
-        glEnable(GL_MULTISAMPLE);
+        GL::Enable(GL_MULTISAMPLE);
     }
 }
 
@@ -165,23 +240,30 @@ void demo_shutdown()
 
     if (gScreenVAO != 0)
     {
-        glDeleteVertexArrays(1, &gScreenVAO);
+        GL::DeleteVertexArrays(1, &gScreenVAO);
         gScreenVAO = 0;
     }
     if (gScreenVBO != 0)
     {
-        glDeleteBuffers(1, &gScreenVBO);
+        GL::DeleteBuffers(1, &gScreenVBO);
         gScreenVBO = 0;
     }
     if (gScreenShader.Shader != 0)
     {
-        glDeleteProgram(gScreenShader.Shader);
+        GL::DeleteProgram(gScreenShader.Shader);
         gScreenShader.Shader = 0;
     }
 }
 
 void demo_draw()
 {
+    // Update FPS tracker
+	const Uint32 currentTicks = SDL_GetTicks();
+	const Uint32 deltaTicks	  = currentTicks - gLastTicks;
+	const double deltaSeconds = deltaTicks / 1000.0;
+	gLastTicks				  = currentTicks;
+	gFPSTracker.Update(deltaSeconds);
+
     static int last_width  = 0;
     static int last_height = 0;
     if (gWidth != last_width || gHeight != last_height)
@@ -200,11 +282,13 @@ void demo_draw()
 
 
     gOffscreenBuffer.BindForRendering();
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    glViewport(0, 0, gWidth, gHeight);
+    GL::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    GL::Clear(GL_COLOR_BUFFER_BIT| GL_DEPTH_BUFFER_BIT);
+    GL::Viewport(0, 0, gWidth, gHeight);
 
     gFarmScene.Render(gWidth, gHeight, gAnimationTime, gZoom);
+    BackgroundRender();
+    DuckRender();
 
 
     GLuint scene_texture = gOffscreenBuffer.GetTexture();
@@ -213,32 +297,59 @@ void demo_draw()
     GLuint final_texture = scene_texture;
     if (gEnablePostFX)
     {
+        // GL::Disable(GL_DEPTH_TEST); // disable depth test for post-processing
         final_texture = gPostProcessing.Apply(scene_texture);
+        
     }
 
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    glViewport(0, 0, gWidth, gHeight);
+    GL::BindFramebuffer(GL_FRAMEBUFFER, 0);
+    GL::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    GL::Clear(GL_COLOR_BUFFER_BIT);
+    GL::Viewport(0, 0, gWidth, gHeight);
 
-    glUseProgram(gScreenShader.Shader);
+    GL::UseProgram(gScreenShader.Shader);
 
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, final_texture);
-    glUniform1i(gScreenShader.UniformLocations.at("uColorTexture"), 0);
+    GL::ActiveTexture(GL_TEXTURE0);
+    GL::BindTexture(GL_TEXTURE_2D, final_texture);
+    GL::Uniform1i(gScreenShader.UniformLocations.at("uColorTexture"), 0);
 
-    glBindVertexArray(gScreenVAO);
-    glDrawArrays(GL_TRIANGLES, 0, gScreenVertexCount);
-
-    glBindVertexArray(0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glUseProgram(0);
+    GL::BindVertexArray(gScreenVAO);
+    GL::DrawArrays(GL_TRIANGLES, 0, gScreenVertexCount);
+    GL::BindVertexArray(0);
+    GL::BindTexture(GL_TEXTURE_2D, 0);
+    GL::UseProgram(0);
 }
 
 void demo_imgui()
 {
     ImGui::Begin("Farm Scene");
+    ImGui::SeparatorText("Depth Settings");
+
+	if (ImGui::Button("Sort as Painters Algorithm"))
+	{
+		std::sort(gBackgroundLayers.begin(), gBackgroundLayers.end(), [](const BackgroundLayer& left, const BackgroundLayer& right) {
+			return left.depth > right.depth; 
+		});
+	}
+
+	if (ImGui::Button("Sort as Front to Back"))
+	{
+		std::sort(
+			gBackgroundLayers.begin(), gBackgroundLayers.end(),
+			[](const BackgroundLayer& left, const BackgroundLayer& right)
+			{
+				return left.depth < right.depth; // then smaller depth drawn first, and frag of larger depth gonna be skipped over by depth test, and hopefully save effort of fragment shader
+			});
+	}
+
+	if (ImGui::Button("Sort Randomly"))
+	{
+		std::random_device rd;
+		std::mt19937	   g(rd());
+		std::shuffle(gBackgroundLayers.begin(), gBackgroundLayers.end(), g);
+	}
+
 
     float percent = 100.0f / gZoom;
     ImGui::SliderFloat("Zoom", &percent, 100.0f, 400.0f);
@@ -440,4 +551,206 @@ void demo_imgui()
     }
 
     ImGui::End();
+}
+
+
+void BackgroundSetup()
+{
+    
+	for (int i = 0; i < NUM_BACKGROUND_LAYERS; ++i)
+	{
+        GL::GenTextures(1, &gBackgroundLayers[i].texture);
+		// Load background texture
+		std::ostringstream sout;
+		sout << "Assets/images/background_" <<  (i) << ".png";
+		const std::filesystem::path image_path = assets::locate_asset(sout.str());
+
+		const bool FLIP = true;
+		stbi_set_flip_vertically_on_load(FLIP);
+		int		   w = 0, h = 0;
+		const int  num_channels		  = 4;
+		int		   files_num_channels = 0;
+		const auto image_bytes		  = stbi_load(image_path.string().c_str(), &w, &h, &files_num_channels, num_channels);
+
+
+		GL::BindTexture(GL_TEXTURE_2D, gBackgroundLayers[i].texture);
+
+		// Texture filtering
+		GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); // GL_LINEAR
+		GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+		// Texture wrapping
+		GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT); // GL_CLAMP_TO_EDGE, GL_MIRRORED_REPEAT
+		GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		constexpr int base_mipmap_level = 0;
+		constexpr int zero_border		= 0;
+		GL::TexImage2D(GL_TEXTURE_2D, base_mipmap_level, GL_RGBA8, w, h, zero_border, GL_RGBA, GL_UNSIGNED_BYTE, image_bytes);
+		stbi_image_free(image_bytes);
+
+		GL::BindTexture(GL_TEXTURE_2D, 0);
+
+        gBackgroundLayers[i].depth = static_cast<float>(i) / NUM_BACKGROUND_LAYERS; // Depth from 0.0, 0.125, ..., 0.875
+	}
+}
+
+void BackgroundRender()
+{
+    // opaque background layers
+    
+    
+
+    // Create NDC transform matrix
+	std::array<float, 9> to_ndc{
+		2.0f / static_cast<float>(gWidth),
+		0.0f,
+		0.0f, // column 0
+		0.0f,
+		2.0f / static_cast<float>(gHeight),
+		0.0f, // column 1
+		0.0f,
+		0.0f,
+		1.0f // column 2
+	};
+
+	gRenderer->BeginScene(to_ndc);
+
+	// Draw each back
+	for (int i = 0; i < NUM_BACKGROUND_LAYERS; ++i)
+	{
+		// Create transform matrix (scale by size and translate to position)
+		const float width  = static_cast<float>(gWidth);
+		const float height = static_cast<float>(gHeight);
+		const float pos_x  = static_cast<float>(0);
+		const float pos_y  = static_cast<float>(0);
+
+		std::array<float, 9> transform{
+			width, 0.0f,   0.0f, // column 0: scale X
+			0.0f,  height, 0.0f, // column 1: scale Y
+			pos_x, pos_y,  1.0f	 // column 2: translation
+		};
+
+		// Texture coordinates for sprite frame selection (left, bottom, right, top)
+		const float left		= 0.0f;
+		const float right		= 1.0f;
+		const float bottom		= 0.0f;
+		const float top			= 1.0f;
+
+		std::array<float, 4> texture_coords{ left, bottom, right, top };
+
+		// Tint color
+		std::array<float, 4> tint{ 1, 1, 1, 1 };
+
+		gRenderer->DrawQuad(transform, gBackgroundLayers[i].depth, gBackgroundLayers[i].texture, texture_coords, tint);
+	}
+
+	gRenderer->EndScene();
+}
+
+void DuckRender()
+{
+
+    GL::DepthMask(GL_FALSE); // disable depth write
+	// Create NDC transform matrix
+	std::array<float, 9> to_ndc{
+		2.0f / static_cast<float>(gWidth),
+		0.0f,
+		0.0f, // column 0
+		0.0f,
+		2.0f / static_cast<float>(gHeight),
+		0.0f, // column 1
+		0.0f,
+		0.0f,
+		1.0f // column 2
+	};
+
+	gRenderer->BeginScene(to_ndc);
+
+	// Draw each duck
+	for (const auto& duck : gDucks)
+	{
+		// Create transform matrix (scale by size and translate to position)
+		const float width  = static_cast<float>(DUCK_FRAME_SIZE.x);
+		const float height = static_cast<float>(DUCK_FRAME_SIZE.y);
+		const float pos_x  = static_cast<float>(duck.position.x);
+		const float pos_y  = static_cast<float>(duck.position.y);
+
+		std::array<float, 9> transform{
+			width, 0.0f,   0.0f, // column 0: scale X
+			0.0f,  height, 0.0f, // column 1: scale Y
+			pos_x, pos_y,  1.0f	 // column 2: translation
+		};
+
+		// Texture coordinates for sprite frame selection (left, bottom, right, top)
+		const float left		= 0.0f;
+		const float right		= 1.0f;
+		const float bottom		= 0.0f;
+		const float top			= 1.0f;
+
+		std::array<float, 4> texture_coords{ left, bottom, right, top };
+
+		// Tint color
+		std::array<float, 4> tint{ duck.r, duck.g, duck.b, duck.a };
+
+		gRenderer->DrawQuad(transform, duck.depth, gDuckTexture, texture_coords, tint);
+	}
+
+	gRenderer->EndScene();
+    GL::DepthMask(GL_TRUE); // enable depth write
+}
+
+void DuckSetup()
+{
+    // Load duck texture
+    const std::filesystem::path image_path = assets::locate_asset("Assets/images/duck.png");
+
+    const bool FLIP = true;
+    stbi_set_flip_vertically_on_load(FLIP);
+    int        w = 0, h = 0;
+    const int  num_channels       = 4;
+    int        files_num_channels = 0;
+    const auto image_bytes        = stbi_load(image_path.string().c_str(), &w, &h, &files_num_channels, num_channels);
+
+    GL::GenTextures(1, &gDuckTexture);
+    GL::BindTexture(GL_TEXTURE_2D, gDuckTexture);
+
+    // Texture filtering
+    GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); // GL_LINEAR
+    GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    // Texture wrapping
+    GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT); // GL_CLAMP_TO_EDGE, GL_MIRRORED_REPEAT
+    GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    constexpr int base_mipmap_level = 0;
+    constexpr int zero_border       = 0;
+    GL::TexImage2D(GL_TEXTURE_2D, base_mipmap_level, GL_RGBA8, w, h, zero_border, GL_RGBA, GL_UNSIGNED_BYTE, image_bytes);
+    stbi_image_free(image_bytes);
+
+    GL::BindTexture(GL_TEXTURE_2D, 0);
+
+    // Create random ducks
+    constexpr int NUM_DUCKS = 10;
+    gDucks.reserve(NUM_DUCKS);
+    for (int i = 0; i < NUM_DUCKS; ++i)
+    {
+        gDucks.push_back(CreateRandomDuck());
+    }
+
+    
+    // GL::Enable(GL_DEPTH_TEST);
+
+    // Initialize VSync (adaptive vsync with fallback to regular vsync)
+    // https://wiki.libsdl.org/SDL_GL_SetSwapInterval
+    
+}
+
+Duck CreateRandomDuck()
+{
+    Duck duck;
+    duck.position = { static_cast<double>(util::random(-gWidth/2 + 100, gWidth/2 - 100)), static_cast<double>(util::random(-gHeight/2 + 100, gHeight/2 - 100)) };
+    duck.r        = util::random(0.f, 1.f);
+    duck.g        = util::random(0.f, 1.f);
+    duck.b        = util::random(0.f, 1.f);
+    duck.a        = util::random(0.5f, 0.8f);
+    duck.depth    = util::random(-0.9f, -0.1f);
+    return duck;
 }

@@ -16,6 +16,13 @@ set(SOURCE_CODE
     Path.hpp Path.cpp
     PostProcessingPipeline.hpp PostProcessingPipeline.cpp
     Shader.hpp Shader.cpp
+    ImmediateRenderer2D.hpp ImmediateRenderer2D.cpp
+    Random.hpp Random.cpp
+    IRenderer2D.hpp
+    GL.cpp GL.h
+    GLConstants.h
+    GLTypes.h
+    FPS.hpp
 )
 
 add_executable(cs200_fun ${SOURCE_CODE})
