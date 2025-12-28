@@ -40,7 +40,7 @@ private:
 		float							depth;
 	};
 
-	static constexpr int					NUM_LAYERS = 8;
+	static constexpr size_t					NUM_LAYERS = 8;
 	std::array<BackGroundLayer, NUM_LAYERS> background_layers{};
 	static constexpr Math::ivec2			default_window_size{ 1920, 1080 };
 	double									scale = 1.0;
@@ -54,7 +54,7 @@ private:
 
 	std::shared_ptr<CS230::Texture> duck_texture;
 
-	static constexpr int		NUM_DUCKS = 10;
+	static constexpr size_t		NUM_DUCKS = 10;
 	std::array<Duck, NUM_DUCKS> ducks{};
 
 	util::FPS FPSTracker;

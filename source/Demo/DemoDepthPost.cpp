@@ -67,7 +67,7 @@ void DemoDepthPost::Load()
 	Engine::GetWindow().SetWindowPosition(SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 
 	auto& texture_manager = Engine::GetTextureManager();
-	for (int i = 0; i < NUM_LAYERS; ++i)
+	for (size_t i = 0; i < NUM_LAYERS; ++i)
 	{
 		background_layers[i].texture = texture_manager.Load("Assets/images/DemoDepthPost/background_" + std::to_string(i) + ".png");
 		background_layers[i].depth	 = static_cast<float>(i) / NUM_LAYERS; // Depth from 0.0, 0.125, ..., 0.875
@@ -81,7 +81,7 @@ void DemoDepthPost::Load()
 
 	// Initialize ducks
 	duck_texture = texture_manager.Load("Assets/images/DemoDepthPost/duck.png");
-	for (int i = 0; i < NUM_DUCKS; ++i)
+	for (size_t i = 0; i < NUM_DUCKS; ++i)
 	{
 		ducks[i].position = { static_cast<double>(util::random(100, default_window_size.x - 100)), static_cast<double>(util::random(100, default_window_size.y - 100)) };
 		uint8_t r		  = static_cast<uint8_t>(util::random(256));
