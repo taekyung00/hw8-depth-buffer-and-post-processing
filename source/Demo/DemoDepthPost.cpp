@@ -19,6 +19,7 @@
 #include "Engine/TextureManager.h"
 #include "Engine/Timer.h"
 #include "Engine/Window.h"
+#include "Engine/Camera.h"
 #include <imgui.h>
 
 #include "CS200/IRenderer2D.h"
@@ -30,7 +31,6 @@
 #include "OpenGL/Environment.h"
 #include "OpenGL/GL.h"
 
-#include "Game/CS230_Final/Components/Grid.h"
 #include "Game/MainMenu.h"
 
 void DemoDepthPost::setupScreenTriangle()

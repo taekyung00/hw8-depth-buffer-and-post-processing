@@ -34,9 +34,7 @@ public:
 private:
 	enum class Option
 	{
-		CS230Final,
-		ConsoleTest,
-		RenderingTest,
+		DemoDepthPost,
 		Exit,
 		COUNT
 	};

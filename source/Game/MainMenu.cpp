@@ -11,15 +11,6 @@ Created:    May 6, 2025
 #include "CS200/IRenderer2D.h"
 #include "CS200/NDC.h"
 #include "CS200/RenderingAPI.h"
-#include "Demo/DemoBatchInstance.h"
-#include "Demo/DemoSceneShowcase/SceneState.h"
-#include "Demo/DemoBufferTypes.h"
-#include "Demo/DemoCS230Textures.h"
-#include "Demo/DemoFramebuffer.h"
-#include "Demo/DemoShapes.h"
-#include "Demo/DemoText.h"
-#include "Demo/DemoTexturing.h"
-#include "Demo/DemoVAO.h"
 #include "Demo/DemoDepthPost.h"
 #include "Engine/Engine.h"
 #include "Engine/GameStateManager.h"
@@ -30,9 +21,6 @@ Created:    May 6, 2025
 
 #include "OpenGL/Environment.h"
 
-#include "Game/CS230_Final/States/Project.h"
-#include "Game/States/ConsoleTest.h"
-#include "Game/States/RenderingTest.h"
 #include "States.h"
 #include <imgui.h>
 
@@ -51,87 +39,22 @@ namespace
 	const double MENU_START_Y_RATIO		 = 0.4;
 }
 
-MainMenu::MainMenu() : current_option(Option::CS230Final)
+MainMenu::MainMenu() : current_option(Option::DemoDepthPost)
 {
 }
 
 void MainMenu::DrawImGui()
 {
-	if (ImGui::Begin("Demo Controls"))
-	{
-		if (ImGui::Button("Switch to Demo DemoBufferTypes"))
-		{
-			Engine::GetGameStateManager().PopState();
-			Engine::GetGameStateManager().PushState<DemoBufferTypes>();
-		}
-		if (ImGui::Button("Switch to Demo DemoCS230Textures"))
-		{
-			Engine::GetGameStateManager().PopState();
-			Engine::GetGameStateManager().PushState<DemoCS230Textures>();
-		}
-		if (ImGui::Button("Switch to Demo DemoFramebuffer"))
-		{
-			Engine::GetGameStateManager().PopState();
-			Engine::GetGameStateManager().PushState<DemoFramebuffer>();
-		}
-		if (ImGui::Button("Switch to Demo DemoShapes"))
-		{
-			Engine::GetGameStateManager().PopState();
-			Engine::GetGameStateManager().PushState<DemoShapes>();
-		}
-		if (ImGui::Button("Switch to Demo DemoText"))
-		{
-			Engine::GetGameStateManager().PopState();
-			Engine::GetGameStateManager().PushState<DemoText>();
-		}
-		if (ImGui::Button("Switch to Demo DemoTexturing"))
-		{
-			Engine::GetGameStateManager().PopState();
-			Engine::GetGameStateManager().PushState<DemoTexturing>();
-		}
-		if (ImGui::Button("Switch to Demo DemoVAO"))
-		{
-			Engine::GetGameStateManager().PopState();
-			Engine::GetGameStateManager().PushState<DemoVAO>();
-		}
-		if (ImGui::Button("Switch to Demo HW6Demo1"))
-		{
-			Engine::GetGameStateManager().PopState();
-			Engine::GetGameStateManager().PushState<DemoBatchInstance>();
-		}
-		if (ImGui::Button("Switch to Demo HW6Demo2"))
-		{
-			Engine::GetGameStateManager().PopState();
-			Engine::GetGameStateManager().PushState<SceneState>();
-		}
-
-		if (ImGui::Button("Switch to Demo DemoDepthPost"))
-		{
-			Engine::GetGameStateManager().PopState();
-			Engine::GetGameStateManager().PushState<DemoDepthPost>();
-		}
-	}
-	ImGui::End();
+	
 }
 
 void MainMenu::select_option()
 {
 	switch (current_option)
 	{
-
-		case MainMenu::Option::CS230Final:
+		case MainMenu::Option::DemoDepthPost:
 			Engine::GetGameStateManager().PopState();
-			Engine::GetGameStateManager().PushState<Project>();
-			break;
-
-		case MainMenu::Option::ConsoleTest:
-			Engine::GetGameStateManager().PopState();
-			Engine::GetGameStateManager().PushState<ConsoleTest>();
-			break;
-
-		case MainMenu::Option::RenderingTest:
-			Engine::GetGameStateManager().PopState();
-			Engine::GetGameStateManager().PushState<RenderingTest>();
+			Engine::GetGameStateManager().PushState<DemoDepthPost>();
 			break;
 
 		case MainMenu::Option::Exit: Engine::GetGameStateManager().PopState(); break;
@@ -242,20 +165,10 @@ void MainMenu::Draw()
 	double current_item_y = 0;
 	int	   i			  = 0;
 
-	// Option: cs230 final
-	i			   = static_cast<int>(Option::CS230Final);
+	// Option: demo depth post
+	i			   = static_cast<int>(Option::DemoDepthPost);
 	current_item_y = menu_start_pos_bl.y - (i * menu_item_total_height);
-	text_manager.DrawText("CS230 Final", Math::vec2{ menu_start_pos_bl.x, current_item_y }, Fonts::Outlined, { 1.0, 1.0 }, colors[Option::CS230Final]);
-
-	// Option: console test
-	i			   = static_cast<int>(Option::ConsoleTest);
-	current_item_y = menu_start_pos_bl.y - (i * menu_item_total_height);
-	text_manager.DrawText("Console test", Math::vec2{ menu_start_pos_bl.x, current_item_y }, Fonts::Outlined, { 1.0, 1.0 }, colors[Option::ConsoleTest]);
-
-	// Option: rendering test
-	i			   = static_cast<int>(Option::RenderingTest);
-	current_item_y = menu_start_pos_bl.y - (i * menu_item_total_height);
-	text_manager.DrawText("Rendering test", Math::vec2{ menu_start_pos_bl.x, current_item_y }, Fonts::Outlined, { 1.0, 1.0 }, colors[Option::RenderingTest]);
+	text_manager.DrawText("Demo Depth Post", Math::vec2{ menu_start_pos_bl.x, current_item_y }, Fonts::Outlined, { 1.0, 1.0 }, colors[Option::DemoDepthPost]);
 
 	// Option: exit
 	i			   = static_cast<int>(Option::Exit);

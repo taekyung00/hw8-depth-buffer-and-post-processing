@@ -5,7 +5,6 @@
  * \copyright DigiPen Institute of Technology
  */
 
-#include "Demo/DemoShapes.h"
 #include "Engine/Engine.h"
 #include "Engine/GameStateManager.h"
 #include "Engine/Window.h"
