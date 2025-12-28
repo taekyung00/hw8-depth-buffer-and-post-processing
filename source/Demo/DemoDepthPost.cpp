@@ -5,13 +5,13 @@
  * \par CS200 Computer Graphics I
  * \copyright DigiPen Institute of Technology
  */
-
 #include "Demo/DemoDepthPost.h"
 #include "DemoDepthPost.h"
 #include "Engine/TextureManager.h"
 #include <algorithm>
 #include <random>
 
+#include "Engine/Camera.h"
 #include "Engine/Collision.h"
 #include "Engine/Input.h"
 #include "Engine/Path.h"
@@ -19,7 +19,6 @@
 #include "Engine/TextureManager.h"
 #include "Engine/Timer.h"
 #include "Engine/Window.h"
-#include "Engine/Camera.h"
 #include <imgui.h>
 
 #include "CS200/IRenderer2D.h"
@@ -122,14 +121,6 @@ void DemoDepthPost::Load()
 			}));
 	}
 
-	{
-		const std::filesystem::path gamma_vert	 = assets::locate_asset("Assets/shaders/PostProcess/simple.vert");
-		const std::filesystem::path gamma_frag	 = assets::locate_asset("Assets/shaders/PostProcess/gamma-correct.frag");
-		auto						gamma_shader = OpenGL::CreateShader(gamma_vert, gamma_frag);
-
-		postProcessing.AddEffect(PostProcessingEffect(
-			"Gamma Correction", PostProcessingEffect::Enable::True, gamma_shader, [&](const OpenGL::CompiledShader& shader) { GL::Uniform1f(shader.UniformLocations.at("uGamma"), gammaValue); }));
-	}
 
 	{
 		const std::filesystem::path chroma_vert	  = assets::locate_asset("Assets/shaders/PostProcess/simple.vert");
@@ -148,6 +139,15 @@ void DemoDepthPost::Load()
 		postProcessing.AddEffect(PostProcessingEffect(
 			"Pixelization", PostProcessingEffect::Enable::True, pixel_shader,
 			[&](const OpenGL::CompiledShader& shader) { GL::Uniform1i(shader.UniformLocations.at("pixelSize"), pixelSize); })); // must be odd
+	}
+
+	{
+		const std::filesystem::path gamma_vert	 = assets::locate_asset("Assets/shaders/PostProcess/simple.vert");
+		const std::filesystem::path gamma_frag	 = assets::locate_asset("Assets/shaders/PostProcess/gamma-correct.frag");
+		auto						gamma_shader = OpenGL::CreateShader(gamma_vert, gamma_frag);
+
+		postProcessing.AddEffect(PostProcessingEffect(
+			"Gamma Correction", PostProcessingEffect::Enable::True, gamma_shader, [&](const OpenGL::CompiledShader& shader) { GL::Uniform1f(shader.UniformLocations.at("uGamma"), gammaValue); }));
 	}
 
 	GL::Enable(GL_BLEND);
@@ -211,8 +211,8 @@ void DemoDepthPost::Unload()
 
 void DemoDepthPost::Draw()
 {
-	static int last_width  = 0;
-	static int last_height = 0;
+	static int		  last_width  = 0;
+	static int		  last_height = 0;
 	const Math::ivec2 window_size = Engine::GetWindow().GetSize();
 	if (window_size.x != last_width || window_size.y != last_height)
 	{
@@ -227,7 +227,7 @@ void DemoDepthPost::Draw()
 	CS200::IRenderer2D* renderer_2d = Engine::GetTextureManager().GetRenderer2D();
 	renderer_2d->BeginScene(CS200::build_ndc_matrix(Engine::GetWindow().GetSize(), true) * GetGSComponent<CS230::Camera>()->GetMatrix());
 
-	
+
 	CS200::RenderingAPI::Clear(); // Clear Color & Depth
 
 	// opaque background layers
@@ -335,7 +335,7 @@ void DemoDepthPost::DrawImGui()
 	static GLint max_msaa_samples = 0;
 	if (max_msaa_samples == 0)
 	{
-		glGetIntegerv(GL_MAX_SAMPLES, &max_msaa_samples);
+		GL::GetIntegerv(GL_MAX_SAMPLES, &max_msaa_samples);
 	}
 
 
@@ -401,121 +401,121 @@ void DemoDepthPost::DrawImGui()
 		}
 	}
 
-	    ImGui::SeparatorText("Post-Processing Effects");
-    ImGui::Checkbox("Enable Post-FX", &enablePostFX);
+	ImGui::SeparatorText("Post-Processing Effects");
+	ImGui::Checkbox("Enable Post-FX", &enablePostFX);
 
-    ImGui::BeginDisabled(!enablePostFX);
-
-
-    if (auto* box_blur = postProcessing.GetEffect("Box Blur"))
-    {
-        ImGui::Checkbox(box_blur->Name.c_str(), reinterpret_cast<bool*>(&box_blur->Enabled));
-
-        ImGui::BeginDisabled(box_blur->Enabled == PostProcessingEffect::Enable::False);
-        ImGui::Indent();
-        ImGui::SliderFloat("Blur Size", &boxBlurSize, 0.0f, 10.0f);
-        ImGui::SliderFloat("Blur Separation", &boxBlurSeparation, 1.0f, 5.0f);
-        ImGui::Unindent();
-        ImGui::EndDisabled();
-    }
+	ImGui::BeginDisabled(!enablePostFX);
 
 
-    if (auto* gamma = postProcessing.GetEffect("Gamma Correction"))
-    {
-        ImGui::Checkbox(gamma->Name.c_str(), reinterpret_cast<bool*>(&gamma->Enabled));
+	if (auto* box_blur = postProcessing.GetEffect("Box Blur"))
+	{
+		ImGui::Checkbox(box_blur->Name.c_str(), reinterpret_cast<bool*>(&box_blur->Enabled));
 
-        ImGui::BeginDisabled(gamma->Enabled == PostProcessingEffect::Enable::False);
-        ImGui::Indent();
-        ImGui::SliderFloat("Gamma", &gammaValue, 0.5f, 4.0f);
-        ImGui::Unindent();
-        ImGui::EndDisabled();
-    }
-
-
-    if (auto* chroma = postProcessing.GetEffect("Chromatic Aberration"))
-    {
-        ImGui::Checkbox(chroma->Name.c_str(), reinterpret_cast<bool*>(&chroma->Enabled));
-
-        ImGui::BeginDisabled(chroma->Enabled == PostProcessingEffect::Enable::False);
-        ImGui::Indent();
-        ImGui::SliderFloat("Focus X", &chromaticAberrationMouseX, 0.0f, 1.0f);
-        ImGui::SliderFloat("Focus Y", &chromaticAberrationMouseY, 0.0f, 1.0f);
-        ImGui::Unindent();
-        ImGui::EndDisabled();
-    }
-
-    if (auto* pixelization = postProcessing.GetEffect("Pixelization"))
-    {
-        ImGui::Checkbox(pixelization->Name.c_str(), reinterpret_cast<bool*>(&pixelization->Enabled));
-
-        ImGui::BeginDisabled(pixelization->Enabled == PostProcessingEffect::Enable::False);
-        ImGui::SliderInt("Pixel Size", &pixelSize, 1, 800);
-        if ((pixelSize & 1) == 0)
-        {
-            pixelSize += 1; // make sure it's odd
-        }
-        // ImGui::Indent();
-        // ImGui::Unindent();
-        ImGui::EndDisabled();
-    }
-
-    ImGui::EndDisabled();
-
-    ImGui::SeparatorText("Render Textures");
+		ImGui::BeginDisabled(box_blur->Enabled == PostProcessingEffect::Enable::False);
+		ImGui::Indent();
+		ImGui::SliderFloat("Blur Size", &boxBlurSize, 0.0f, 10.0f);
+		ImGui::SliderFloat("Blur Separation", &boxBlurSeparation, 1.0f, 5.0f);
+		ImGui::Unindent();
+		ImGui::EndDisabled();
+	}
 
 
-    static int         selected_effect_index = -1;
-    static const char* effect_names[]        = { "Box Blur", "Gamma Correction", "Chromatic Aberration", "Pixelization" };
-    static const char* current_effect_name   = "None";
+	if (auto* gamma = postProcessing.GetEffect("Gamma Correction"))
+	{
+		ImGui::Checkbox(gamma->Name.c_str(), reinterpret_cast<bool*>(&gamma->Enabled));
 
-    if (selected_effect_index >= 0 && selected_effect_index < 4)
-    {
-        current_effect_name = effect_names[selected_effect_index];
-    }
-
-    if (ImGui::BeginCombo("View Effect", current_effect_name))
-    {
-        if (ImGui::Selectable("None", selected_effect_index == -1))
-        {
-            selected_effect_index = -1;
-        }
-
-        for (int i = 0; i < 4; i++)
-        {
-            bool is_selected = (selected_effect_index == i);
-            if (ImGui::Selectable(effect_names[i], is_selected))
-            {
-                selected_effect_index = i;
-            }
-            if (is_selected)
-            {
-                ImGui::SetItemDefaultFocus();
-            }
-        }
-        ImGui::EndCombo();
-    }
+		ImGui::BeginDisabled(gamma->Enabled == PostProcessingEffect::Enable::False);
+		ImGui::Indent();
+		ImGui::SliderFloat("Gamma", &gammaValue, 0.5f, 4.0f);
+		ImGui::Unindent();
+		ImGui::EndDisabled();
+	}
 
 
-    if (enablePostFX && selected_effect_index >= 0 && selected_effect_index < 4)
-    {
-        if (auto* effect = postProcessing.GetEffect(effect_names[selected_effect_index]))
-        {
-            if (effect->Enabled == PostProcessingEffect::Enable::True && effect->Framebuffer)
-            {
-                ImGui::Text("Output Texture (%s):", effect->Name.c_str());
-                OpenGL::TextureHandle texture = effect->Framebuffer->GetTexture();
+	if (auto* chroma = postProcessing.GetEffect("Chromatic Aberration"))
+	{
+		ImGui::Checkbox(chroma->Name.c_str(), reinterpret_cast<bool*>(&chroma->Enabled));
 
-                const float     aspect_ratio   = static_cast<float>(default_window_size.x) / static_cast<float>(default_window_size.y);
-                constexpr float display_width  = 400.0f;
-                const float     display_height = display_width / aspect_ratio;
+		ImGui::BeginDisabled(chroma->Enabled == PostProcessingEffect::Enable::False);
+		ImGui::Indent();
+		ImGui::SliderFloat("Focus X", &chromaticAberrationMouseX, 0.0f, 1.0f);
+		ImGui::SliderFloat("Focus Y", &chromaticAberrationMouseY, 0.0f, 1.0f);
+		ImGui::Unindent();
+		ImGui::EndDisabled();
+	}
 
-                ImGui::Image(static_cast<ImTextureRef>(texture), ImVec2(display_width, display_height), ImVec2(0, 1), ImVec2(1, 0));
-            }
-            else if (effect->Enabled == PostProcessingEffect::Enable::False)
-            {
-                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "Effect is disabled");
-            }
-        }
-    }
+	if (auto* pixelization = postProcessing.GetEffect("Pixelization"))
+	{
+		ImGui::Checkbox(pixelization->Name.c_str(), reinterpret_cast<bool*>(&pixelization->Enabled));
+
+		ImGui::BeginDisabled(pixelization->Enabled == PostProcessingEffect::Enable::False);
+		ImGui::SliderInt("Pixel Size", &pixelSize, 1, 800);
+		if ((pixelSize & 1) == 0)
+		{
+			pixelSize += 1; // make sure it's odd
+		}
+		// ImGui::Indent();
+		// ImGui::Unindent();
+		ImGui::EndDisabled();
+	}
+
+	ImGui::EndDisabled();
+
+	ImGui::SeparatorText("Render Textures");
+
+
+	static int		   selected_effect_index = -1;
+	static const char* effect_names[]		 = { "Box Blur", "Gamma Correction", "Chromatic Aberration", "Pixelization" };
+	static const char* current_effect_name	 = "None";
+
+	if (selected_effect_index >= 0 && selected_effect_index < 4)
+	{
+		current_effect_name = effect_names[selected_effect_index];
+	}
+
+	if (ImGui::BeginCombo("View Effect", current_effect_name))
+	{
+		if (ImGui::Selectable("None", selected_effect_index == -1))
+		{
+			selected_effect_index = -1;
+		}
+
+		for (int i = 0; i < 4; i++)
+		{
+			bool is_selected = (selected_effect_index == i);
+			if (ImGui::Selectable(effect_names[i], is_selected))
+			{
+				selected_effect_index = i;
+			}
+			if (is_selected)
+			{
+				ImGui::SetItemDefaultFocus();
+			}
+		}
+		ImGui::EndCombo();
+	}
+
+
+	if (enablePostFX && selected_effect_index >= 0 && selected_effect_index < 4)
+	{
+		if (auto* effect = postProcessing.GetEffect(effect_names[selected_effect_index]))
+		{
+			if (effect->Enabled == PostProcessingEffect::Enable::True && effect->Framebuffer)
+			{
+				ImGui::Text("Output Texture (%s):", effect->Name.c_str());
+				OpenGL::TextureHandle texture = effect->Framebuffer->GetTexture();
+
+				const float		aspect_ratio   = static_cast<float>(default_window_size.x) / static_cast<float>(default_window_size.y);
+				constexpr float display_width  = 400.0f;
+				const float		display_height = display_width / aspect_ratio;
+
+				ImGui::Image(static_cast<ImTextureRef>(texture), ImVec2(display_width, display_height), ImVec2(0, 1), ImVec2(1, 0));
+			}
+			else if (effect->Enabled == PostProcessingEffect::Enable::False)
+			{
+				ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "Effect is disabled");
+			}
+		}
+	}
 	ImGui::End();
 }

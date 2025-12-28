@@ -84,7 +84,7 @@ void PostProcessingPipeline::Shutdown()
         }
         if (effect.Shader.Shader != 0)
         {
-            glDeleteProgram(effect.Shader.Shader);
+            GL::DeleteProgram(effect.Shader.Shader);
             effect.Shader.Shader = 0;
         }
     }
@@ -92,12 +92,12 @@ void PostProcessingPipeline::Shutdown()
 
     if (fullscreenVAO != 0)
     {
-        glDeleteVertexArrays(1, &fullscreenVAO);
+        GL::DeleteVertexArrays(1, &fullscreenVAO);
         fullscreenVAO = 0;
     }
     if (fullscreenVBO != 0)
     {
-        glDeleteBuffers(1, &fullscreenVBO);
+        GL::DeleteBuffers(1, &fullscreenVBO);
         fullscreenVBO = 0;
     }
 }
