@@ -33,15 +33,13 @@ Ensure you have the following extensions installed:
    - **Windows/Linux**: `Ctrl + Shift + P`
    - **macOS**: `Cmd + Shift + P`
 3. Search for **CMake: Select Configure Preset** and choose `Web Debug` or `Web Debug on Windows`.
-4. Open the command palette again and Search for **Live Preview: Start Server Logging** and activate it
-   - This should create a background webserver so that we can view & debug the webpage
-5. Open the `Run & Debug` tab (`Ctrl + Shift + D`).
-6. In the dropdown, select the browser for debugging (`Chrome` or `Edge`).
-7. Start the debugging session by:
+4. Open the `Run & Debug` tab (`Ctrl + Shift + D`).
+5. In the dropdown, select the browser for debugging (`Chrome` or `Edge`).
+6. Start the debugging session by:
    - Pressing `F5`, or
    - Clicking the green play button.
-8. This launches a local web server on port `3000` and opens the browser to load your HTML page for debugging.
-9. **Set a breakpoint** in your code while it's running to step through execution.
+7. This launches a local web server on port `3000` and opens the browser to load your HTML page for debugging.
+8. **Set a breakpoint** in your code while it's running to step through execution.
 
 Now you can debug your web project just like in a native environment!
 

@@ -8,8 +8,6 @@
 // Include GLEW first to define OpenGL functions and constants
 #include <GL/glew.h>
 
-// #include "Engine/Engine.h"
-// #include "Engine/Logger.h"
 #include "GL.h"
 
 #include <cassert>
@@ -212,10 +210,15 @@ namespace GL
     void BlendFunc(GLenum sfactor, GLenum dfactor SOURCE_LOCATION)
     {
         glCheck(glBlendFunc(sfactor, dfactor));
-    }
+	}
 
-    void BufferData(GLenum target, GLsizeiptr size, const GLvoid* data, GLenum usage SOURCE_LOCATION)
-    {
+	void BlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter SOURCE_LOCATION)
+	{
+        glCheck(glBlitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter));
+	}
+
+	void BufferData(GLenum target, GLsizeiptr size, const GLvoid* data, GLenum usage SOURCE_LOCATION)
+	{
         glCheck(glBufferData(target, size, data, usage));
     }
 

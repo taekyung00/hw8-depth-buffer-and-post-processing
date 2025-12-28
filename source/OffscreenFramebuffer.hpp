@@ -52,6 +52,7 @@ private:
 
     OpenGL::Handle msaaFramebuffer{ 0 };
     OpenGL::Handle msaaColorRenderbuffer{ 0 };
+    OpenGL::Handle depthRenderbuffer{ 0 };
 
     void createResolveFramebuffer();
     void createMSAAFramebuffer();

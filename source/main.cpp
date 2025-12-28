@@ -1,148 +1,83 @@
 /**
  * \file
  * \author Rudy Castan
- * \date 2025 Fall
- * \par CS200 Computer Graphics I
+ * \date 2024 Fall
  * \copyright DigiPen Institute of Technology
  */
 
+#include "Demo/DemoShapes.h"
+#include "Engine/Engine.h"
+#include "Engine/GameStateManager.h"
+#include "Engine/Window.h"
+#include "Game/Splash.h"
 
-#include "ImGuiHelper.hpp"
-#include <GL/glew.h>
-#include <SDL.h>
-#include <gsl/gsl>
-#include <iostream>
+namespace
+{
+    [[maybe_unused]] int  gWindowWidth  = 400;
+    [[maybe_unused]] int  gWindowHeight = 400;
+    [[maybe_unused]] bool gNeedResize   = false;
+}
 
-gsl::owner<SDL_Window*>   gWindow  = nullptr;
-gsl::owner<SDL_GLContext> gContext = nullptr;
-bool                      gIsDone  = false;
-int                       gWidth   = 1920;
-int                       gHeight  = 1080;
 
 #if defined(__EMSCRIPTEN__)
 #    include <emscripten.h>
 #    include <emscripten/bind.h>
-
-EMSCRIPTEN_BINDINGS(main_window)
-{
-    emscripten::function("setWindowSize", emscripten::optional_override([](int sizeX, int sizeY) { SDL_SetWindowSize(gWindow, sizeX, sizeY); }));
-}
-
-#endif
-
-
-void demo_setup();
-void demo_draw();
-void demo_imgui();
-void demo_shutdown();
-
-void setup()
-{
-    ImGuiHelper::Initialize(gWindow, gContext);
-    demo_setup();
-}
-
-void main_loop();
-
-int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
-{
-#ifdef DEVELOPER_VERSION
-    std::cout << "Developer Version\n";
-#endif
-
-#ifdef IS_WEBGL2
-    std::cout << "WebGL 2 Version\n";
-#else
-    std::cout << "OpenGL Desktop Version\n";
-#endif
-
-    std::cout << "Hello World!\nRudy is here\n";
-
-
-    SDL_Init(SDL_INIT_VIDEO);
-#ifdef IS_WEBGL2
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
-#else
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-#endif
-
-
-    gWindow = SDL_CreateWindow("CS200 Fun", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, gWidth, gHeight, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
-
-    gContext = SDL_GL_CreateContext(gWindow);
-
-    SDL_GL_MakeCurrent(gWindow, gContext);
-
-    glewInit();
-
-
-    constexpr int ADAPTIVE_SYNC = -1;
-    constexpr int VSYNC         = 1;
-    if (const auto result = SDL_GL_SetSwapInterval(ADAPTIVE_SYNC); result != 0)
-    {
-        SDL_GL_SetSwapInterval(VSYNC);
-    }
-
-    setup();
-
-#if !defined(__EMSCRIPTEN__)
-    while (!gIsDone)
-    {
-        main_loop();
-    }
-#else
-    const bool simulate_infinte_loop   = true;
-    const int  match_browser_framerate = -1;
-    emscripten_set_main_loop(main_loop, match_browser_framerate, simulate_infinte_loop);
-#endif
-
-    demo_shutdown();
-    SDL_GL_DeleteContext(gContext);
-    SDL_DestroyWindow(gWindow);
-    SDL_Quit();
-
-    return 0;
-}
+#    include <emscripten/em_asm.h>
 
 void main_loop()
 {
-    SDL_Event event;
-    while (SDL_PollEvent(&event) != 0)
+    Engine& engine = Engine::Instance();
+    if (gNeedResize)
     {
-        ImGuiHelper::FeedEvent(event);
-        switch (event.type)
-        {
-            case SDL_WINDOWEVENT:
-                if (event.window.windowID == SDL_GetWindowID(gWindow))
-                {
-                    if (event.window.event == SDL_WINDOWEVENT_CLOSE)
-                    {
-                        gIsDone = true;
-                    }
-                    if (event.window.event == SDL_WINDOWEVENT_RESIZED || event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
-                    {
-                        gWidth  = event.window.data1;
-                        gHeight = event.window.data2;
-                    }
-                }
-                break;
-            case SDL_QUIT: gIsDone = true; break;
-
-            default: break;
-        }
+        Engine::GetWindow().ForceResize(gWindowWidth, gWindowHeight);
+        gNeedResize = false;
     }
 
+    engine.Update();
 
-    glViewport(0, 0, gWidth, gHeight);
-    demo_draw();
+    if (engine.HasGameEnded())
+    {
+        emscripten_cancel_main_loop();
+        engine.Stop();
+    }
+}
 
+EMSCRIPTEN_BINDINGS(main_window)
+{
+    emscripten::function(
+        "setWindowSize", emscripten::optional_override(
+                             [](int sizeX, int sizeY)
+                             {
+                                 sizeX                  = (sizeX < 400) ? 400 : sizeX; // Minimum size enforcement
+                                 sizeY                  = (sizeY < 400) ? 400 : sizeY; // Minimum size enforcement  
+                                 const auto window_size = Engine::GetWindow().GetSize();
+                                 if (sizeX != window_size.x || sizeY != window_size.y)
+                                 {
+                                     gNeedResize   = true;
+                                     gWindowWidth  = sizeX;
+                                     gWindowHeight = sizeY;
+                                 }
+                             }));
+}
+#endif
 
-    [[maybe_unused]] const auto viewport = ImGuiHelper::Begin();
-    demo_imgui();
-    ImGuiHelper::End();
+int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
+{
+    Engine& engine = Engine::Instance();
+    engine.Start("Taekyung Ho Engine Porting");
+    engine.GetGameStateManager().PushState<Splash>();
 
-
-    SDL_GL_SwapWindow(gWindow);
+#if !defined(__EMSCRIPTEN__)
+    while (engine.HasGameEnded() == false)
+    {
+        engine.Update();
+    }
+    engine.Stop();
+#else
+    // https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_set_main_loop
+    constexpr bool simulate_infinite_loop  = true;
+    constexpr int  match_browser_framerate = -1;
+    emscripten_set_main_loop(main_loop, match_browser_framerate, simulate_infinite_loop);
+#endif
+    return 0;
 }

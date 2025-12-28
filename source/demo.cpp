@@ -281,12 +281,13 @@ void demo_draw()
     }
 
 
+    GL::Enable(GL_DEPTH_TEST);
     gOffscreenBuffer.BindForRendering();
     GL::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     GL::Clear(GL_COLOR_BUFFER_BIT| GL_DEPTH_BUFFER_BIT);
     GL::Viewport(0, 0, gWidth, gHeight);
 
-    gFarmScene.Render(gWidth, gHeight, gAnimationTime, gZoom);
+    // gFarmScene.Render(gWidth, gHeight, gAnimationTime, gZoom);
     BackgroundRender();
     DuckRender();
 
@@ -295,11 +296,11 @@ void demo_draw()
 
 
     GLuint final_texture = scene_texture;
+    GL::Disable(GL_DEPTH_TEST);
     if (gEnablePostFX)
     {
         // GL::Disable(GL_DEPTH_TEST); // disable depth test for post-processing
         final_texture = gPostProcessing.Apply(scene_texture);
-        
     }
 
 
