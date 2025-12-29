@@ -160,7 +160,7 @@ void MainMenu::Draw()
 
 	auto& text_manager = Engine::GetTextManager();
 
-	text_manager.DrawText("Engine Porting", title_pos, Fonts::Outlined, title_scale, title_color);
+	text_manager.DrawText("CS200 HW8", title_pos, Fonts::Outlined, title_scale, title_color);
 
 	double current_item_y = 0;
 	int	   i			  = 0;
