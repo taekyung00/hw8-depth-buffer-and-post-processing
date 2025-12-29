@@ -43,7 +43,7 @@ private:
 	static constexpr size_t					NUM_LAYERS = 8;
 	std::array<BackGroundLayer, NUM_LAYERS> background_layers{};
 	static constexpr Math::ivec2			default_window_size{ 1920, 1080 };
-	double									scale = 1.0;
+	inline static double ratio = 1.0;
 
 	struct Duck
 	{

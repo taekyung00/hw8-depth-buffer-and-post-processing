@@ -11,7 +11,6 @@
 #include <algorithm>
 #include <random>
 
-#include "Engine/Camera.h"
 #include "Engine/Collision.h"
 #include "Engine/Input.h"
 #include "Engine/Path.h"
@@ -63,8 +62,10 @@ void DemoDepthPost::setupScreenTriangle()
 
 void DemoDepthPost::Load()
 {
+	// #if !defined(__EMSCRIPTEN__)
 	Engine::GetWindow().ForceResize(default_window_size.x, default_window_size.y);
 	Engine::GetWindow().SetWindowPosition(SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+	// #endif
 
 	auto& texture_manager = Engine::GetTextureManager();
 	for (size_t i = 0; i < NUM_LAYERS; ++i)
@@ -83,13 +84,18 @@ void DemoDepthPost::Load()
 	duck_texture = texture_manager.Load("Assets/images/DemoDepthPost/duck.png");
 	for (size_t i = 0; i < NUM_DUCKS; ++i)
 	{
-		ducks[i].position = { static_cast<double>(util::random(100, default_window_size.x - 100)), static_cast<double>(util::random(100, default_window_size.y - 100)) };
-		uint8_t r		  = static_cast<uint8_t>(util::random(256));
-		uint8_t g		  = static_cast<uint8_t>(util::random(256));
-		uint8_t b		  = static_cast<uint8_t>(util::random(256));
-		uint8_t a		  = static_cast<uint8_t>(util::random(100, 250)); // get transparency between 100 and 250
-		ducks[i].color	  = CS200::pack_color(std::array<uint8_t, 4>{ r, g, b, a });
-		ducks[i].depth	  = static_cast<float>(util::random(-0.9, -0.1)); // Depth between -0.9 to -0.1
+#if defined(__EMSCRIPTEN__)
+		ducks[i].position = { static_cast<double>(util::random(500, 900)), static_cast<double>(util::random(500, 800)) };
+#else
+		Math::ivec2 window_size = Engine::GetWindow().GetSize();
+		ducks[i].position = { static_cast<double>(util::random(100, window_size.x - 100)), static_cast<double>(util::random(100, window_size.y - 100)) };
+#endif
+		uint8_t r	   = static_cast<uint8_t>(util::random(256));
+		uint8_t g	   = static_cast<uint8_t>(util::random(256));
+		uint8_t b	   = static_cast<uint8_t>(util::random(256));
+		uint8_t a	   = static_cast<uint8_t>(util::random(100, 250)); // get transparency between 100 and 250
+		ducks[i].color = CS200::pack_color(std::array<uint8_t, 4>{ r, g, b, a });
+		ducks[i].depth = static_cast<float>(util::random(-0.9, -0.1)); // Depth between -0.9 to -0.1
 	}
 
 	// sort ducks by depth back to front(painter's algorithm)
@@ -128,7 +134,7 @@ void DemoDepthPost::Load()
 		auto						chroma_shader = OpenGL::CreateShader(chroma_vert, chroma_frag);
 
 		postProcessing.AddEffect(PostProcessingEffect(
-			"Chromatic Aberration", PostProcessingEffect::Enable::True, chroma_shader,
+			"Chromatic Aberration", PostProcessingEffect::Enable::False, chroma_shader,
 			[&](const OpenGL::CompiledShader& shader) { GL::Uniform2f(shader.UniformLocations.at("uMouseFocusPoint"), chromaticAberrationMouseX, chromaticAberrationMouseY); }));
 	}
 	{
@@ -137,7 +143,7 @@ void DemoDepthPost::Load()
 		auto						pixel_shader = OpenGL::CreateShader(pixel_vert, pixel_frag);
 
 		postProcessing.AddEffect(PostProcessingEffect(
-			"Pixelization", PostProcessingEffect::Enable::True, pixel_shader,
+			"Pixelization", PostProcessingEffect::Enable::False, pixel_shader,
 			[&](const OpenGL::CompiledShader& shader) { GL::Uniform1i(shader.UniformLocations.at("pixelSize"), pixelSize); })); // must be odd
 	}
 
@@ -147,7 +153,7 @@ void DemoDepthPost::Load()
 		auto						gamma_shader = OpenGL::CreateShader(gamma_vert, gamma_frag);
 
 		postProcessing.AddEffect(PostProcessingEffect(
-			"Gamma Correction", PostProcessingEffect::Enable::True, gamma_shader, [&](const OpenGL::CompiledShader& shader) { GL::Uniform1f(shader.UniformLocations.at("uGamma"), gammaValue); }));
+			"Gamma Correction", PostProcessingEffect::Enable::False, gamma_shader, [&](const OpenGL::CompiledShader& shader) { GL::Uniform1f(shader.UniformLocations.at("uGamma"), gammaValue); }));
 	}
 
 	GL::Enable(GL_BLEND);
@@ -157,20 +163,6 @@ void DemoDepthPost::Load()
 	{
 		GL::Enable(GL_MULTISAMPLE);
 	}
-
-	AddGSComponent(new CS230::Camera(Math::rect{ Math::to_vec2(default_window_size) * 0.3, Math::to_vec2(default_window_size) * 0.7 }));
-	CS230::Camera* camera = GetGSComponent<CS230::Camera>();
-	camera->SetLimit(
-		{
-			{ 0, 0 },
-			  default_window_size
-	  });
-	camera->SetAnchoring() = true;
-	camera->SetPosition({ default_window_size.x / 2.0, default_window_size.y / 2.0 });
-	camera->SetFirstPersonView() = false;
-	camera->SetScale({ scale, scale });
-	camera->SetRotation(0.0);
-	camera->SetSmoothing() = false;
 }
 
 void DemoDepthPost::Update([[maybe_unused]] double dt)
@@ -214,6 +206,10 @@ void DemoDepthPost::Draw()
 	static int		  last_width  = 0;
 	static int		  last_height = 0;
 	const Math::ivec2 window_size = Engine::GetWindow().GetSize();
+	ratio						  = static_cast<double>(window_size.x) / default_window_size.x;
+#if defined(__EMSCRIPTEN__)
+	ratio = 0.3;
+#endif
 	if (window_size.x != last_width || window_size.y != last_height)
 	{
 		offscreenBuffer.Resize(window_size.x, window_size.y);
@@ -225,7 +221,7 @@ void DemoDepthPost::Draw()
 	GL::Enable(GL_DEPTH_TEST);
 	offscreenBuffer.BindForRendering();
 	CS200::IRenderer2D* renderer_2d = Engine::GetTextureManager().GetRenderer2D();
-	renderer_2d->BeginScene(CS200::build_ndc_matrix(Engine::GetWindow().GetSize(), true) * GetGSComponent<CS230::Camera>()->GetMatrix());
+	renderer_2d->BeginScene(CS200::build_ndc_matrix(window_size));
 
 
 	CS200::RenderingAPI::Clear(); // Clear Color & Depth
@@ -238,14 +234,18 @@ void DemoDepthPost::Draw()
 
 	for (const auto& layer : background_layers)
 	{
-		layer.texture->Draw(Math::TransformationMatrix(), 0xFFFFFFFF, layer.depth);
+		layer.texture->Draw(Math::TransformationMatrix() * Math::ScaleMatrix(ratio), 0xFFFFFFFF, layer.depth);
 	}
 
 	// transparent ducks
 	GL::DepthMask(GL_FALSE); // disable depth write
 	for (const auto& duck : ducks)
 	{
-		duck_texture->Draw(Math::TranslationMatrix(duck.position), duck.color, duck.depth);
+#if defined(__EMSCRIPTEN__)
+		duck_texture->Draw(Math::TranslationMatrix(Math::vec2{ -500, -500 }) * Math::TranslationMatrix(duck.position) * Math::ScaleMatrix(ratio), duck.color, duck.depth);
+#else
+		duck_texture->Draw(Math::TranslationMatrix(duck.position) * Math::ScaleMatrix(ratio), duck.color, duck.depth);
+#endif
 	}
 	GL::DepthMask(GL_TRUE); // enable depth write
 	renderer_2d->EndScene();
@@ -316,15 +316,6 @@ void DemoDepthPost::DrawImGui()
 		std::random_device rd;
 		std::mt19937	   g(rd());
 		std::shuffle(std::begin(background_layers), std::end(background_layers), g);
-	}
-	ImGui::SeparatorText("Camera Scale");
-	float previous_scale = static_cast<float>(scale);
-	ImGui::SliderFloat("Zoom", &previous_scale, 0.1f, 10.0f);
-	if (previous_scale != static_cast<float>(scale))
-	{
-		CS230::Camera* camera = GetGSComponent<CS230::Camera>();
-		camera->SetScale({ static_cast<double>(previous_scale), static_cast<double>(previous_scale) });
-		scale = static_cast<double>(previous_scale);
 	}
 	ImGui::SeparatorText("MSAA Settings");
 	bool msaa_changed = ImGui::Checkbox("Enable MSAA", &useMSAA);
