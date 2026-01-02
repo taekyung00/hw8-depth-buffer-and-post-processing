@@ -1,0 +1,2032 @@
+================================================
+FILE: source/Engine/Particle.cpp
+================================================
+#include "Particle.h"
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Particle.cpp
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    June 6, 2025
+*/
+
+namespace CS230 {
+	Particle::Particle(const std::filesystem::path& sprite_file) : 
+		
+		GameObject({0,0}),
+		life(0.0)
+	{
+		AddGOComponent(new Sprite(sprite_file, this));
+	}
+
+
+	void Particle::Start(Math::vec2 _position, Math::vec2 _velocity, double max_life, CS200::RGBA _color)
+	{
+		SetPosition(_position);
+		SetVelocity(_velocity);
+		life = max_life;
+		real_color = _color;
+		GetGOComponent<Sprite>()->PlayAnimation(0);
+	}
+
+	void Particle::Update(double dt) {
+		if (Alive()) {
+			life -= dt;
+			//Engine::GetLogger().LogDebug(std::to_string(life));
+			GameObject::Update(dt);
+		}
+	}
+
+	void Particle::Draw(Math::TransformationMatrix camera_matrix, [[maybe_unused]]unsigned int color, float depth)
+	{
+		if (Alive()) {
+			GameObject::Draw(camera_matrix, real_color, depth);
+		}
+	}
+}
+
+
+================================================
+FILE: source/Engine/Particle.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Particle.h
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    June 6, 2025
+*/
+#pragma once
+#include "../Game/GameObjectTypes.h"
+#include "GameObject.h"
+#include "GameObjectManager.h"
+#include "GameStateManager.h"
+
+namespace CS230
+{
+    class Particle : public GameObject
+    {
+    public:
+        Particle(const std::filesystem::path& sprite_file);
+        void Start(Math::vec2 _position, Math::vec2 _velocity, double max_life, CS200::RGBA _color = CS200::WHITE);
+        void Update(double dt) override;
+		void Draw(Math::TransformationMatrix camera_matrix, unsigned int color = 0xFFFFFFFF, float depth = 0.5f) override;
+
+        int DrawPriority() const override
+		{
+			return 70;
+		}
+        bool Alive()
+        {
+            return life > 0;
+        }
+
+        GameObjectTypes Type() override
+        {
+            return GameObjectTypes::Particle;
+        }
+
+    private:
+        double life;
+		CS200::RGBA real_color;
+    };
+
+    template <typename T>
+    class ParticleManager : public Component
+    {
+    public:
+        ParticleManager();
+        ~ParticleManager();
+        void Emit(size_t count, Math::vec2 emitter_position, Math::vec2 emitter_velocity, Math::vec2 direction, double spread, CS200::RGBA = CS200::WHITE);
+
+    private:
+        std::vector<T*> particles;
+        size_t             index;
+    };
+
+    template <typename T>
+    inline ParticleManager<T>::ParticleManager() : index(0)
+    {
+		int max_count = T::MaxCount;
+		auto game_object_mamager = Engine::GetGameStateManager().GetGSComponent<CS230::GameObjectManager>();
+		for (int i = 0; i < max_count; ++i)
+        {
+            T* new_particle = new T();
+
+            game_object_mamager->Add(new_particle);
+
+            particles.push_back(new_particle);
+        }
+    }
+
+    template <typename T>
+    inline ParticleManager<T>::~ParticleManager()
+    {
+        //for (T* particle : particles)
+        //{
+        //    particle->Destroy();
+        //}
+        particles.clear();
+    }
+
+    template <typename T>
+    inline void ParticleManager<T>::Emit(size_t count, Math::vec2 emitter_position, Math::vec2 emitter_velocity, Math::vec2 direction, double spread, CS200::RGBA color)
+    {
+        for (size_t i = 0; i < count; ++i)
+        {
+            if ((particles[i])&&(particles[i]->Alive()))
+            {
+                Engine::GetLogger().LogEvent("Particle overwritten");
+            }
+            double angle_variation = 0.0;
+            if (spread != 0)
+            {
+                angle_variation = static_cast<double>((rand() % static_cast<int>(spread * 1024)) / 1024) - spread / 2;
+            }
+            Math::vec2 random_magnitude  = direction * static_cast<double>(static_cast<float>((rand() % 1024) / 2048) + 0.5f);
+            Math::vec2 particle_velocity = Math::RotationMatrix(angle_variation) * random_magnitude + emitter_velocity;
+            particles[index]->Start(emitter_position, particle_velocity, T::MaxLife,color);
+
+            ++index;
+            if (index >= particles.size())
+            {
+                index = 0;
+            }
+        }
+    }
+
+}
+
+
+
+================================================
+FILE: source/Engine/Path.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#include "Path.h"
+
+#include <SDL.h>
+#include <optional>
+
+namespace
+{
+    std::optional<std::filesystem::path> try_get_asset_path(const std::filesystem::path& starting_directory)
+    {
+        namespace fs                 = std::filesystem;
+        fs::path       assets_parent = fs::absolute(starting_directory);
+        const fs::path root          = assets_parent.root_path();
+
+        // note that the do while loop is needed because on the web platform the starting folder is the root and that's also where the assets folder should be
+        do
+        {
+            const fs::path assets_folder = assets_parent / "Assets";
+            if (fs::is_directory(assets_folder))
+            {
+                return assets_parent;
+            }
+            // if assets not found then try looking the in parent folder
+            assets_parent = assets_parent.parent_path();
+        } while (assets_parent != root);
+
+        return std::nullopt;
+    }
+}
+
+namespace assets
+{
+
+    std::filesystem::path get_base_path()
+    {
+        namespace fs                  = std::filesystem;
+        static fs::path assets_folder = []()
+        {
+            auto result = try_get_asset_path(fs::current_path());
+            if (result)
+                return result.value();
+            // try from the exe path rather than the current working directory
+            const auto base_path = SDL_GetBasePath();
+            result               = try_get_asset_path(base_path);
+            SDL_free(base_path);
+            if (result)
+                return result.value();
+            throw std::runtime_error{ "Failed to find Assets folder in parent folders" };
+        }();
+        return assets_folder;
+    }
+
+    std::filesystem::path locate_asset(const std::filesystem::path& asset_path)
+    {
+        auto asset_filepath = asset_path;
+        if (!std::filesystem::exists(asset_filepath))
+        {
+            // try prepending the asset directory path
+            asset_filepath = get_base_path() / asset_filepath;
+            if (!std::filesystem::exists(asset_filepath))
+            {
+                throw std::runtime_error("Failed to locate asset: " + asset_path.string());
+            }
+        }
+        return asset_filepath;
+    }
+}
+
+
+
+================================================
+FILE: source/Engine/Path.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+
+#include <filesystem>
+
+namespace assets
+{
+
+    std::filesystem::path get_base_path();
+    std::filesystem::path locate_asset(const std::filesystem::path& asset_path);
+}
+
+
+
+================================================
+FILE: source/Engine/Random.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#include "Random.h"
+
+#include <cassert>
+#include <chrono>
+#include <random>
+#include <thread>
+
+namespace
+{
+    using namespace std;
+    using namespace chrono;
+
+    mt19937_64& RandomEngine()
+    {
+        thread_local static mt19937_64 engine{ static_cast<mt19937_64::result_type>(system_clock::now().time_since_epoch().count()) + hash<thread::id>{}(this_thread::get_id()) };
+        return engine;
+    }
+}
+
+namespace util
+{
+    double random(double min_inclusive, double max_exclusive) noexcept
+    {
+        assert(min_inclusive < max_exclusive);
+        return std::uniform_real_distribution<double>(min_inclusive, max_exclusive)(RandomEngine());
+    }
+
+    int random(int min_inclusive, int max_exclusive) noexcept
+    {
+        assert(min_inclusive < max_exclusive - 1);
+        return std::uniform_int_distribution<int>(min_inclusive, max_exclusive - 1)(RandomEngine());
+    }
+
+    int random(int max_exclusive) noexcept
+    {
+        return random(0, max_exclusive);
+    }
+}
+
+
+
+================================================
+FILE: source/Engine/Random.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+
+namespace util
+{
+    double random(double min_inclusive = 0.0, double max_exclusive = 1.0) noexcept;
+    int    random(int min_inclusive, int max_exclusive) noexcept;
+    int    random(int max_exclusive) noexcept;
+}
+
+
+
+================================================
+FILE: source/Engine/Rect.h
+================================================
+ /**
+  * \file
+  * \author Rudy Castan
+  * \author Jonathan Holmes
+  * \author Taekyung Ho
+  * \date 2025 Fall
+  * \par CS200 Computer Graphics I
+  * \copyright DigiPen Institute of Technology
+  */
+
+ #pragma once
+ #include "Vec2.h"
+ #include <algorithm>
+
+ namespace Math
+ {
+     struct [[nodiscard]] rect
+     {
+         Math::vec2 point_1{ 0.0, 0.0 };
+         Math::vec2 point_2{ 0.0, 0.0 };
+         
+         double Left() const noexcept
+         {
+             return std::min(point_1.x, point_2.x);
+         }
+
+         double Right() const noexcept
+         {
+             return std::max(point_1.x, point_2.x);
+         }
+
+         double Top() const noexcept
+         {
+             return std::max(point_1.y, point_2.y);
+         }
+
+         double Bottom() const noexcept
+         {
+             return std::min(point_1.y, point_2.y);
+         }
+
+         Math::vec2 Center() const noexcept{
+            return {(Left() + Right()) * 0.5, (Top() + Bottom()) * 0.5};
+         }
+         Math::vec2 Size() const noexcept
+         {
+             return { Right() - Left(), Top() - Bottom() };
+         }
+     };
+
+     struct [[nodiscard]] irect
+     {
+         Math::ivec2 point_1{ 0, 0 };
+         Math::ivec2 point_2{ 0, 0 };
+
+         int Left() const noexcept
+         {
+             return std::min(point_1.x, point_2.x);
+         }
+
+         int Right() const noexcept
+         {
+             return std::max(point_1.x, point_2.x);
+         }
+
+         int Top() const noexcept
+         {
+             return std::max(point_1.y, point_2.y);
+         }
+
+         int Bottom() const noexcept
+         {
+             return std::min(point_1.y, point_2.y);
+         }
+
+         Math::ivec2 Size() const noexcept
+         {
+             return { Right() - Left(), Top() - Bottom() };
+         }
+     };
+ }
+
+
+
+================================================
+FILE: source/Engine/ShowCollision.cpp
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  ShowCollision.cpp
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    May 17, 2025
+*/
+#include "ShowCollision.h"
+#include "Input.h"
+
+CS230::ShowCollision::ShowCollision() : enabled(true) {}
+
+void CS230::ShowCollision::Update([[maybe_unused]]double dt) {
+    if (Engine::GetInput().KeyJustReleased(CS230::Input::Keys::Tab) == true) {
+        enabled = !enabled;
+    }
+}
+
+bool CS230::ShowCollision::Enabled() {
+    return enabled;
+}
+
+
+
+================================================
+FILE: source/Engine/ShowCollision.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  ShowCollision.h
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    May 17, 2025
+*/
+#pragma once
+#include "Component.h"
+#include "Engine.h"
+namespace CS230 {
+    class ShowCollision : public CS230::Component {
+    public:
+        ShowCollision();
+        void Update(double dt) override;
+        bool Enabled();
+    private:
+        bool enabled;
+    };
+}
+
+
+
+================================================
+FILE: source/Engine/Sprite.cpp
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Sprite.cpp
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    March 19, 2025
+*/
+
+#include "GameObject.h"
+#include "Sprite.h"
+#include "TextureManager.h"
+#include "Logger.h"
+#include "Path.h"
+#include <fstream>
+
+CS230::Sprite::Sprite(const std::filesystem::path& sprite_file, GameObject* _given_object) {
+    Load(sprite_file, _given_object);
+}
+
+CS230::Sprite::~Sprite()
+{
+    for (Animation* animation : animations) {
+        delete animation;
+    }
+    animations.clear();
+}
+
+CS230::Sprite::Sprite(Sprite&& temporary) noexcept :
+    texture(std::move(temporary.texture)),
+    hotspots(std::move(temporary.hotspots)),
+    current_animation(temporary.current_animation),
+    frame_size(temporary.frame_size),
+    frame_texels(std::move(temporary.frame_texels)),
+    animations(std::move(temporary.animations))
+{}
+
+CS230::Sprite& CS230::Sprite::operator=(Sprite && temporary) noexcept
+{
+    std::swap(texture, temporary.texture);
+    std::swap(hotspots, temporary.hotspots);
+    std::swap(current_animation, temporary.current_animation);
+    std::swap(frame_size, temporary.frame_size);
+    std::swap(frame_texels, frame_texels);
+    std::swap(animations, temporary.animations);
+    return *this;
+}
+
+void CS230::Sprite::Update(double dt)
+{
+    animations[current_animation]->Update(dt);
+}
+
+void CS230::Sprite::Load(const std::filesystem::path& sprite_file, GameObject* _given_object)
+{
+    const std::filesystem::path sprite_path = assets::locate_asset(sprite_file);
+    given_object = _given_object;
+    animations.clear();
+    if (sprite_path.extension() != ".spt")
+    {
+        throw std::runtime_error(sprite_path.generic_string() + " is not a .spt file");
+    }
+    
+    std::ifstream               in_file(sprite_path);
+
+    if (in_file.is_open() == false) {
+        throw std::runtime_error("Failed to load " + sprite_path.generic_string());
+    }
+
+    hotspots.clear();
+    frame_texels.clear();
+
+    std::string text;
+    in_file >> text;
+    texture = Engine::GetTextureManager().Load(text);
+    frame_size = Engine::GetTextureManager().Load(text)->GetSize();
+
+    in_file >> text;
+    while (in_file.eof() == false) {
+        if (text == "FrameSize") {
+            in_file >> frame_size.x;
+            in_file >> frame_size.y;
+        }
+        
+        else if (text == "NumFrames") {
+            int frame_count;
+            in_file >> frame_count;
+            for (int i = 0; i < frame_count; i++) {
+                frame_texels.push_back({ frame_size.x * i, 0 });
+            }
+        }
+        else if (text == "Frame") {
+            int frame_location_x, frame_location_y;
+            in_file >> frame_location_x;
+            in_file >> frame_location_y;
+            frame_texels.push_back({ frame_location_x, frame_location_y });
+        }
+        else if (text == "HotSpot") {
+            int hotspot_x, hotspot_y;
+            in_file >> hotspot_x;
+            in_file >> hotspot_y;
+            hotspots.push_back({ hotspot_x, hotspot_y });
+        }
+        else if (text == "Anim") {
+            in_file >> text;
+            animations.push_back(new Animation(text));
+        }
+        else if (text == "RectCollision") {
+            Math::irect boundary;
+            in_file >> boundary.point_1.x >> boundary.point_1.y >> boundary.point_2.x >> boundary.point_2.y;
+            if (given_object == nullptr) {
+                Engine::GetLogger().LogError("Cannot add collision to a null object");
+            }
+            else {
+                given_object->AddGOComponent(new RectCollision(boundary, given_object));
+            }
+        }
+        else if (text == "CircleCollision") {
+            double radius;
+            in_file >> radius;
+            if (given_object == nullptr) {
+                Engine::GetLogger().LogError("Cannot add collision to a null object");
+            }
+            else {
+                given_object->AddGOComponent(new CircleCollision(radius, given_object));
+            }
+        }
+        else {
+            Engine::GetLogger().LogError("Unknown command: " + text);
+        }
+        in_file >> text;
+    }
+    if (frame_texels.empty() == true) {
+        frame_texels.push_back({ 0,0 });
+    }
+
+    if (animations.empty() == true) {
+        animations.push_back(new Animation());
+        PlayAnimation(0);
+    }
+    
+
+}
+
+void CS230::Sprite::Draw(Math::TransformationMatrix display_matrix, unsigned int color, float depth)
+{
+	texture->Draw(display_matrix * Math::TranslationMatrix(-GetHotSpot(0)), GetFrameTexel(animations[current_animation]->CurrentFrame()), GetFrameSize(), color,depth);
+}
+
+Math::ivec2 CS230::Sprite::GetHotSpot(size_t index)
+{
+	if ( index > hotspots.size()) {
+		Engine::GetLogger().LogDebug("Invalid index in hospot!");
+		return Math::ivec2{ 0,0 };
+	}
+	return hotspots[index];
+}
+
+Math::ivec2 CS230::Sprite::GetFrameSize()
+{
+    return frame_size;
+}
+
+void CS230::Sprite::PlayAnimation(size_t animation)
+{
+    if (animation >= animations.size()) {
+        Engine::GetLogger().LogDebug("Invalid index in animation!");
+        current_animation = 0;
+        return;
+    }
+    current_animation = animation;
+    animations[current_animation]->Reset();
+}
+
+bool CS230::Sprite::AnimationEnded()
+{
+    return animations[current_animation]->Ended();
+}
+
+Math::ivec2 CS230::Sprite::GetFrameTexel(size_t index) const
+{
+    if ( index >= frame_texels.size()) {
+        Engine::GetLogger().LogDebug("Invalid index in frametexles!");
+        return Math::ivec2{ 0,0 };
+    }
+    return frame_texels[index];
+}
+
+
+
+================================================
+FILE: source/Engine/Sprite.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Sprite.h
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    March 19, 2025
+*/
+
+#pragma once
+#include <string>
+#include "Vec2.h"
+#include "Texture.h"
+#include "Matrix.h"
+#include "Engine.h"
+#include "Animation.h"
+#include "Component.h"
+#include "Collision.h"
+
+
+namespace CS230 {
+    class GameObject;
+    class Sprite : public Component {
+    public:
+        Sprite(const std::filesystem::path& sprite_file,GameObject* given_object);
+        ~Sprite();
+
+        Sprite(const Sprite&) = delete;
+        Sprite& operator=(const Sprite&) = delete;
+
+        Sprite(Sprite&& temporary) noexcept;
+        Sprite& operator=(Sprite&& temporary) noexcept;
+        void Update(double dt) override;
+        void Load(const std::filesystem::path& sprite_file, GameObject* _given_object);
+		void		Draw(Math::TransformationMatrix display_matrix, unsigned int color = 0xFFFFFFFF, float depth = 0.5f);
+        Math::ivec2 GetHotSpot(size_t index);
+        Math::ivec2 GetFrameSize();
+
+        void PlayAnimation(size_t animation);
+        bool AnimationEnded();
+
+        const size_t& CurrentAnimation() const { return current_animation; }
+    private:
+        Math::ivec2 GetFrameTexel(size_t index) const;
+        // Texture* texture;
+        std::shared_ptr<CS230::Texture> texture;
+        std::vector<Math::ivec2> hotspots;
+
+        size_t current_animation;
+        Math::ivec2 frame_size;
+        std::vector<Math::ivec2> frame_texels;
+        std::vector<Animation*> animations;
+
+        GameObject* given_object;
+    };
+}
+
+
+
+================================================
+FILE: source/Engine/TextManager.cpp
+================================================
+#include "TextManager.h"
+
+
+void TextManager::DrawText(const std::string& text, const Math::vec2& position, Fonts font, const Math::vec2& scale, CS200::RGBA color) const
+{
+    if (auto text_texture = fonts[font]->PrintToTexture(text, color); text_texture)
+    {
+        const auto transform = Math::TranslationMatrix(position) * Math::ScaleMatrix(scale);
+        text_texture->Draw(transform, color);
+    }
+}
+
+
+
+void TextManager::Init()
+{
+    add_font("Assets/fonts/Font_Simple.png");
+    add_font("Assets/fonts/Font_Outlined.png");
+}
+
+void TextManager::add_font(const std::filesystem::path& file_name)
+{
+    fonts.push_back(std::make_unique<CS230::Font>(file_name));
+}
+
+
+
+================================================
+FILE: source/Engine/TextManager.h
+================================================
+/**
+ * \file
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par GAM200 Engine Porting
+ * \copyright DigiPen Institute of Technology
+ */
+#include "Font.h"
+#include "Fonts.h"
+#include <memory>
+#include <vector>
+
+class TextManager
+{
+public:
+    TextManager() = default;
+    void Init();
+    void DrawText(const std::string& text, const Math::vec2& position, Fonts font, const Math::vec2& scale = { 1.0, 1.0 }, CS200::RGBA color = CS200::WHITE) const;
+
+private:
+    // static CS230::Font* get_font(size_t);
+
+    void add_font(const std::filesystem::path& file_name);
+
+    std::vector<std::unique_ptr<CS230::Font>> fonts{};
+};
+
+
+================================================
+FILE: source/Engine/Texture.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+#include "Texture.h"
+
+#include "CS200/IRenderer2D.h"
+#include "CS200/Image.h"
+#include "Engine.h"
+#include "Matrix.h"
+#include "OpenGL/GL.h"
+#include "TextureManager.h"
+#include "Window.h"
+
+namespace CS230
+{
+
+	void Texture::Draw([[maybe_unused]] const Math::TransformationMatrix& display_matrix, unsigned int color, float depth)
+	{
+		Draw(display_matrix, { 0, 0 }, image_size, color, depth);
+	}
+
+	void Texture::Draw(const Math::TransformationMatrix& display_matrix, Math::ivec2 texel_position, Math::ivec2 frame_size, unsigned int color, float depth)
+	{
+		CS200::IRenderer2D* renderer = Engine::GetTextureManager().GetRenderer2D();
+
+
+		// OpenGL Texture: (0,0) Bottom-Left
+		// Image Pixel: (0,0) Top-Left
+		const double u_left	  = static_cast<double>(texel_position.x) / image_size.x;
+		const double u_right  = static_cast<double>(texel_position.x + frame_size.x) / image_size.x;
+		// V_top  = 1.0 - (y / height)
+		// V_bottom  = 1.0 - ((y + h) / height)
+		const double v_top	  = 1.0 - (static_cast<double>(texel_position.y) / image_size.y);
+		const double v_bottom = 1.0 - (static_cast<double>(texel_position.y + frame_size.y) / image_size.y);
+
+		const Math::vec2 texel_coord_bl = { u_left, v_bottom };
+		const Math::vec2 texel_coord_tr = { u_right, v_top };
+
+		Math::vec2 set_bottom_left{ frame_size.x * 0.5, frame_size.y * 0.5 };
+		const auto world_transformation = display_matrix * Math::TranslationMatrix(set_bottom_left) * Math::ScaleMatrix(frame_size);
+
+		renderer->DrawQuad(world_transformation, textureHandle, texel_coord_bl, texel_coord_tr, color, depth);
+	}
+
+	Math::ivec2 Texture::GetSize() const
+	{
+		return image_size;
+	}
+
+	Texture::~Texture()
+	{
+		GL::DeleteTextures(1, &textureHandle), textureHandle = 0;
+	}
+
+	Texture::Texture(Texture&& temporary) noexcept : image_size{ std::move(temporary.image_size) }, textureHandle{ std::move(temporary.textureHandle) }
+	{
+		temporary.textureHandle = 0;
+		temporary.image_size	= { 0, 0 };
+	}
+
+	Texture& Texture::operator=(Texture&& temporary) noexcept
+	{
+		std::swap(image_size, (temporary.image_size));
+		std::swap(textureHandle, temporary.textureHandle);
+		return *this;
+	}
+
+	Texture::Texture(const std::filesystem::path& file_name)
+	{
+		const auto image = CS200::Image{ file_name, true };
+		image_size		 = image.GetSize();
+		textureHandle	 = OpenGL::CreateTextureFromImage(image, OpenGL::Filtering::NearestPixel, OpenGL::Wrapping::ClampToEdge);
+	}
+
+	Texture::Texture([[maybe_unused]] OpenGL::TextureHandle given_texture, [[maybe_unused]] Math::ivec2 the_size) : image_size{ the_size }, textureHandle{ given_texture }
+	{
+	}
+}
+
+
+
+================================================
+FILE: source/Engine/Texture.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+#pragma once
+
+#include "CS200/Image.h"
+#include "Matrix.h"
+#include "OpenGL/Texture.h"
+#include <filesystem>
+#include <memory>
+
+#include "Vec2.h"
+
+namespace CS230
+{
+	class Font;
+
+	/**
+	 * \brief High-level texture wrapper for 2D graphics rendering and resource management
+	 *
+	 * Texture provides a convenient, RAII-compliant wrapper around OpenGL texture objects
+	 * that simplifies texture loading, rendering, and resource management. The class handles
+	 * the complex details of OpenGL texture creation, coordinate system transformations,
+	 * and automatic memory cleanup while providing an intuitive interface for 2D graphics.
+	 *
+	 * Key Features:
+	 * - Automatic texture loading from image files with proper format conversion
+	 * - RAII resource management ensuring textures are properly cleaned up
+	 * - High-level drawing interface with transformation matrix support
+	 * - Sprite sheet support for animation and texture atlases
+	 * - Integration with the 2D renderer for efficient batched rendering
+	 * - Move semantics for efficient texture transfers and storage
+	 *
+	 * Resource Management:
+	 * The texture automatically handles OpenGL texture creation and deletion through
+	 * RAII principles. Move-only semantics prevent accidental texture duplication
+	 * while allowing efficient transfer of texture ownership between objects.
+	 *
+	 * Coordinate Systems:
+	 * The class handles the conversion between different coordinate systems:
+	 * - Image coordinates (pixel-based, top-left origin)
+	 * - Texture coordinates (normalized 0-1 range, bottom-left origin)
+	 * - World coordinates (transformation matrix-based positioning)
+	 *
+	 * Common Use Cases:
+	 * - Sprite rendering for games and interactive applications
+	 * - UI element graphics and interface components
+	 * - Texture atlas rendering for efficient sprite animation
+	 * - Background and environment art rendering
+	 * - Font glyph rendering (through Font class integration)
+	 *
+	 * The texture integrates seamlessly with the engine's transformation system,
+	 * allowing for easy scaling, rotation, and positioning of graphics elements.
+	 */
+	class Texture
+	{
+	public:
+		
+
+		friend class TextureManager;
+		friend class Font;
+
+		/**
+		 * \brief Draw the entire texture with transformation and color tinting
+		 * \param display_matrix Transformation matrix for positioning, scaling, and rotation
+		 * \param color RGBA color value for tinting the texture (default: white/no tint)
+		 *
+		 * Renders the complete texture to the screen using the provided transformation
+		 * matrix to control positioning, scaling, and rotation. This is the primary
+		 * method for drawing sprites, UI elements, and other texture-based graphics.
+		 *
+		 * Transformation Handling:
+		 * The method automatically handles the necessary coordinate system conversions
+		 * and applies appropriate scaling and translation to ensure the texture appears
+		 * correctly positioned according to the transformation matrix. The texture is
+		 * drawn with its center as the transformation origin.
+		 *
+		 * Color Tinting:
+		 * The color parameter allows for real-time tinting of the texture without
+		 * modifying the original image data. This enables effects like:
+		 * - Color-based visual feedback (damage flashing, selection highlighting)
+		 * - Transparency and fade effects through alpha channel modification
+		 * - Uniform lighting or environmental color effects
+		 * - UI state visualization (disabled buttons, hover states)
+		 *
+		 * Rendering Integration:
+		 * The method integrates with the engine's 2D renderer for efficient batched
+		 * rendering, automatically managing texture binding and shader state for
+		 * optimal performance when drawing multiple textures.
+		 */
+		void Draw(const Math::TransformationMatrix& display_matrix, unsigned int color = 0xFFFFFFFF, float depth = 0.6f);
+
+		/**
+		 * \brief Draw a rectangular region of the texture (sprite sheet support)
+		 * \param display_matrix Transformation matrix for positioning, scaling, and rotation
+		 * \param texel_position Top-left corner position in pixel coordinates within the texture
+		 * \param frame_size Size of the region to draw in pixels
+		 * \param color RGBA color value for tinting the texture (default: white/no tint)
+		 *
+		 * Renders a specific rectangular region of the texture, enabling sprite sheet
+		 * functionality, texture atlases, and animation frame rendering. This method
+		 * is essential for efficient graphics where multiple sprites or animation
+		 * frames are packed into a single texture file.
+		 *
+		 * Sprite Sheet Applications:
+		 * - Character animation frames stored in a grid layout
+		 * - UI element collections (buttons, icons, decorative elements)
+		 * - Tile sets for 2D game environments
+		 * - Font glyph rendering from character atlases
+		 * - Particle effect textures with multiple variations
+		 *
+		 * Coordinate System:
+		 * The texel_position uses pixel coordinates with (0,0) at the top-left
+		 * of the texture, following standard image coordinate conventions. The
+		 * method automatically converts these to the appropriate OpenGL texture
+		 * coordinates for rendering.
+		 *
+		 * Performance Benefits:
+		 * Using sprite sheets reduces texture binding overhead and improves
+		 * rendering performance by allowing multiple related graphics to be
+		 * stored in a single texture object, enabling more efficient batching.
+		 *
+		 * The transformation matrix affects the final rendered size and position,
+		 * while frame_size determines which portion of the texture is sampled.
+		 */
+		void Draw(const Math::TransformationMatrix& display_matrix, Math::ivec2 texel_position, Math::ivec2 frame_size, unsigned int color = 0xFFFFFFFF, float depth = 0.f);
+
+		/**
+		 * \brief Get the dimensions of the texture in pixels
+		 * \return Vector containing width and height of the texture
+		 *
+		 * Returns the original size of the texture as loaded from the image file,
+		 * providing essential information for layout calculations, collision detection,
+		 * and coordinate system conversions. This size information is particularly
+		 * useful when working with sprite sheets or when precise positioning is required.
+		 *
+		 * Common uses:
+		 * - Calculating sprite sheet frame positions and sizes
+		 * - Determining collision boundaries for texture-based objects
+		 * - Computing appropriate scaling factors for different screen resolutions
+		 * - Layout calculations for UI elements and text rendering
+		 * - Animation frame calculations and sprite positioning
+		 *
+		 * The returned size reflects the texture's native resolution and remains
+		 * constant regardless of how the texture is drawn or transformed during rendering.
+		 */
+		Math::ivec2 GetSize() const;
+
+		/**
+		 * \brief Destructor ensuring proper OpenGL resource cleanup
+		 *
+		 * Automatically releases the underlying OpenGL texture object when the
+		 * Texture instance is destroyed, preventing GPU memory leaks and ensuring
+		 * proper resource management. This follows RAII principles to guarantee
+		 * cleanup even in the presence of exceptions or early returns.
+		 */
+		~Texture();
+
+		/**
+		 * \brief Get the underlying OpenGL texture handle for advanced operations
+		 * \return OpenGL texture handle for direct OpenGL operations
+		 *
+		 * Provides access to the raw OpenGL texture handle for advanced rendering
+		 * operations that require direct OpenGL texture binding or integration
+		 * with custom rendering systems. This method should be used sparingly
+		 * and only when the high-level interface is insufficient.
+		 *
+		 * Advanced use cases:
+		 * - Integration with custom shader programs
+		 * - Direct OpenGL texture operations
+		 * - Interfacing with third-party graphics libraries
+		 * - Performance-critical rendering paths that bypass the 2D renderer
+		 *
+		 * Handle Ownership:
+		 * The returned handle remains owned by the Texture object and should not
+		 * be manually deleted or modified. The handle becomes invalid when the
+		 * Texture object is destroyed.
+		 */
+		[[nodiscard]] OpenGL::TextureHandle GetHandle() const
+		{
+			return textureHandle;
+		}
+
+
+	private:
+		// Private constructors - textures can only be created through TextureManager or Font
+		// This ensures proper resource management and prevents accidental texture duplication
+		explicit Texture(const std::filesystem::path& file_name);
+		// for new texture!! check texturemanager!!
+		Texture(OpenGL::TextureHandle given_texture, Math::ivec2 the_size);
+
+
+	public:
+		/**
+		 * \brief Deleted copy constructor and assignment operator
+		 *
+		 * Textures use move-only semantics to prevent accidental duplication of
+		 * OpenGL resources. Copying textures would require expensive GPU operations
+		 * and could lead to resource management complications, so copy operations
+		 * are explicitly disabled to encourage efficient resource usage patterns.
+		 */
+		Texture(const Texture&)			   = delete;
+		Texture& operator=(const Texture&) = delete;
+
+		/**
+		 * \brief Move constructor for efficient texture transfer
+		 * \param temporary Texture object to move from (will be left in valid but empty state)
+		 *
+		 * Efficiently transfers ownership of the OpenGL texture resource from one
+		 * Texture object to another without copying GPU data. The source texture
+		 * is left in a safe, destructible state with no valid texture handle.
+		 *
+		 * Move semantics enable:
+		 * - Efficient storage of textures in containers (std::vector, std::map)
+		 * - Return of textures from factory functions without copying
+		 * - Transfer of texture ownership between different systems
+		 * - Optimal performance when reorganizing texture collections
+		 */
+		Texture(Texture&& temporary) noexcept;
+
+		/**
+		 * \brief Move assignment operator for efficient texture replacement
+		 * \param temporary Texture object to move from (will be left in valid but empty state)
+		 * \return Reference to this texture after the move operation
+		 *
+		 * Replaces the current texture with another texture's resources using
+		 * efficient move semantics. The previous texture resource is properly
+		 * cleaned up, and the new resource is transferred without GPU data copying.
+		 *
+		 * The operation uses swap semantics to ensure exception safety and
+		 * guarantee that both the old and new textures are handled correctly
+		 * even if unexpected conditions occur during the transfer.
+		 */
+		Texture& operator=(Texture&& temporary) noexcept;
+
+
+	private:
+
+
+		// CS200::Image image; // use initialize member list -> or it will be initialized with default ctor -> but it doesn't exist!!
+		Math::ivec2			  image_size;
+		OpenGL::TextureHandle textureHandle;
+	};
+}
+
+
+
+================================================
+FILE: source/Engine/TextureManager.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+
+#include "TextureManager.h"
+#include "CS200/IRenderer2D.h"
+#include "CS200/NDC.h"
+#include "Engine.h"
+#include "Logger.h"
+#include "OpenGL/GL.h"
+#include "Path.h"
+#include "Texture.h"
+#include "Window.h"
+
+namespace CS230
+{
+	std::shared_ptr<Texture> TextureManager::Load(const std::filesystem::path& file_name)
+	{
+		const std::filesystem::path file_path = assets::locate_asset(file_name);
+		if (textures.find(file_path) == textures.end())
+		{
+			// textures[file_name] = new Texture(file_name);
+			textures[file_path] = std::shared_ptr<Texture>(new Texture(file_path));
+
+			Engine::GetLogger().LogEvent("Loading Texture: " + file_path.string());
+		}
+		return textures[file_path];
+	}
+
+	void TextureManager::Init()
+	{
+        current_renderer_type = RendererType::Immediate;
+		// Create and initialize new renderer
+		switch (current_renderer_type)
+		{
+			case RendererType::Immediate: renderer2D = std::make_unique<CS200::ImmediateRenderer2D>(); break;
+			case RendererType::Batch: renderer2D = std::make_unique<CS200::BatchRenderer2D>(); break;
+			case RendererType::Instanced: renderer2D = std::make_unique<CS200::InstancedRenderer2D>(); break;
+			default: renderer2D = std::make_unique<CS200::ImmediateRenderer2D>(); break;
+		}
+
+		if (renderer2D)
+		{
+			renderer2D->Init();
+		}
+		else
+		{
+			throw std::runtime_error("renderer initialize failed!");
+		}
+	}
+
+	void TextureManager::Unload()
+	{
+		for (std::pair<std::filesystem::path, std::shared_ptr<Texture>> texture : textures)
+		{
+			// delete texture.second;
+			Engine::GetLogger().LogEvent("Unload Texture: " + texture.first.string());
+		}
+		textures.clear();
+	}
+
+	void TextureManager::StartRenderTextureMode([[maybe_unused]] int width, [[maybe_unused]] int height)
+	{
+		// auto& renderer_2d = Engine::GetRenderer2D();
+		auto& render_info = get_render_info();
+		//  * - Ends current 2D renderer scene to ensure clean state transition
+        CS200::IRenderer2D* renderer_2d = GetRenderer2D();
+		renderer_2d->EndScene();
+
+		//  * - Creates OpenGL framebuffer with color attachment of specified dimensions
+		render_info.Size   = { width, height };
+		render_info.Target = OpenGL::CreateFramebufferWithColor(Math::ivec2{ width, height });
+
+		//  * - Saves current viewport, clear color, and rendering state for restoration
+		GL::GetFloatv(GL_COLOR_CLEAR_VALUE, render_info.ClearColor.data());
+		GL::GetIntegerv(GL_VIEWPORT, render_info.Viewport.data());
+
+		//  * - Sets up Y-flipped coordinate system for proper texture orientation
+		const auto ndc_matrix = Math::ScaleMatrix({ 1.0, -1.0 }) * CS200::build_ndc_matrix(render_info.Size);
+		renderer_2d->BeginScene(ndc_matrix);
+
+		//  * - Binds framebuffer as render target, replacing screen rendering
+		GL::BindFramebuffer(GL_FRAMEBUFFER, render_info.Target.Framebuffer);
+		GL::Viewport(0, 0, render_info.Size.x, render_info.Size.y);
+
+		//  * - Clears render target with transparent black (0,0,0,0) for clean start
+		GL::ClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+		GL::Clear(GL_COLOR_BUFFER_BIT);
+	}
+
+	std::shared_ptr<Texture> TextureManager::EndRenderTextureMode()
+	{
+		CS200::IRenderer2D* renderer_2d = GetRenderer2D();
+		auto& render_info = get_render_info();
+		// * Cleanup and Restoration Process:
+		//  * - Ends current 2D renderer scene to flush any pending draw operations
+		renderer_2d->EndScene();
+		//  * - Unbinds framebuffer (returns to default screen framebuffer 0)
+		GL::BindFramebuffer(GL_FRAMEBUFFER, 0);
+		//  * - Restores original viewport dimensions from saved state
+		GL::Viewport(render_info.Viewport[0], render_info.Viewport[1], render_info.Viewport[2], render_info.Viewport[3]);
+		//  * - Restores original clear color values from saved state
+		GL::ClearColor(render_info.ClearColor[0], render_info.ClearColor[1], render_info.ClearColor[2], render_info.ClearColor[3]);
+		//  * - Begins new 2D renderer scene with screen-appropriate coordinate system
+		renderer_2d->BeginScene(CS200::build_ndc_matrix(Engine::GetWindow().GetSize()));
+		//  * - Deletes temporary framebuffer to free GPU resources
+		auto framebuffer_to_delete = render_info.Target.Framebuffer;
+		GL::DeleteFramebuffers(1, &framebuffer_to_delete);
+
+
+		//          * Texture Creation:
+		//  * Creates a new Texture object by wrapping the framebuffer's color attachment:
+		auto scene_texture				   = new Texture(render_info.Target.ColorAttachment, render_info.Size);
+		//  * - Transfers ownership of OpenGL texture ID from framebuffer to Texture object
+		render_info.Target.ColorAttachment = 0; // old one
+		//  * - Preserves original dimensions specified in StartRenderTextureMode()
+		//  * - Maintains RGBA format with alpha channel for transparency support
+		//  * - Content includes all drawing operations performed during render-to-texture mode
+		return std::shared_ptr<Texture>(scene_texture);
+	}
+
+	void TextureManager::SwitchRenderer(RendererType type)
+	{
+		if (current_renderer_type == type)
+			return; // Already using this renderer
+
+		// Shutdown current renderer
+		if (renderer2D)
+		{
+			renderer2D->Shutdown();
+			renderer2D.reset();
+		}
+
+		// Create and initialize new renderer
+		current_renderer_type = type;
+		switch (type)
+		{
+			case RendererType::Immediate: renderer2D = std::make_unique<CS200::ImmediateRenderer2D>(); break;
+			case RendererType::Batch: renderer2D = std::make_unique<CS200::BatchRenderer2D>(); break;
+			case RendererType::Instanced: renderer2D = std::make_unique<CS200::InstancedRenderer2D>(); break;
+			default: renderer2D = std::make_unique<CS200::ImmediateRenderer2D>(); break;
+		}
+
+		if (renderer2D)
+		{
+			renderer2D->Init();
+		}
+	}
+
+	TextureManager::RendererType TextureManager::GetCurrentRendererType() const
+	{
+		return current_renderer_type;
+	}
+
+	CS200::IRenderer2D* TextureManager::GetRenderer2D()
+	{
+		return renderer2D.get();
+	}
+
+	void TextureManager::Shutdown()
+	{
+        renderer2D->Shutdown();
+		renderer2D.reset();
+	}
+}
+
+
+
+================================================
+FILE: source/Engine/TextureManager.h
+================================================
+
+
+#pragma once
+#include "CS200/BatchRenderer2D.h"
+#include "CS200/InstancedRenderer2D.h"
+#include "CS200/IRenderer2D.h"
+#include "CS200/ImmediateRenderer2D.h"
+#include "OpenGL/Framebuffer.h"
+#include <filesystem>
+#include <map>
+#include <memory>
+#include <unordered_map>
+#include <vector>
+
+namespace CS230
+{
+	class Texture;
+
+	class TextureManager
+	{
+	public:
+		enum class RendererType
+		{
+			Immediate,
+			Batch,
+			Instanced
+		};
+
+		std::shared_ptr<Texture> Load(const std::filesystem::path& file_name);
+
+		void							Init();
+		void							Unload();
+		static void						StartRenderTextureMode(int width, int height);
+		static std::shared_ptr<Texture> EndRenderTextureMode();
+		void							SwitchRenderer(RendererType type);
+		RendererType					GetCurrentRendererType() const;
+		static CS200::IRenderer2D*		GetRenderer2D();
+		void							Shutdown();
+
+
+	private:
+		RendererType									  current_renderer_type = RendererType::Batch;
+		inline static std::unique_ptr<CS200::IRenderer2D> renderer2D{};
+
+		std::map<std::filesystem::path, std::shared_ptr<Texture>> textures;
+
+		struct RenderInfo
+		{
+			// RenderInfo() = default;
+			OpenGL::FramebufferWithColor Target{};
+			Math::ivec2					 Size{};
+			std::array<GLfloat, 4>		 ClearColor{};
+			std::array<GLint, 4>		 Viewport{};
+		};
+
+		// inline static RenderInfo render_info{};
+
+		static RenderInfo& get_render_info()
+		{
+			static RenderInfo instance;
+			return instance;
+		}
+	};
+}
+
+
+
+================================================
+FILE: source/Engine/Timer.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+
+#include <chrono>
+#include "Component.h"
+namespace util
+{
+    class [[nodiscard]] Timer : public CS230::Component{
+    private:
+        using clock_t  = std::chrono::steady_clock;
+        using second_t = std::chrono::duration<double, std::ratio<1>>;
+
+        std::chrono::time_point<clock_t> timeStamp;
+
+    public:
+        Timer() noexcept : timeStamp(clock_t::now())
+        {
+        }
+
+        void ResetTimeStamp() noexcept
+        {
+            timeStamp = clock_t::now();
+        }
+
+        double GetElapsedSeconds() const noexcept
+        {
+            return std::chrono::duration_cast<second_t>(clock_t::now() - timeStamp).count();
+        }
+    };
+}
+
+
+
+================================================
+FILE: source/Engine/Vec2.cpp
+================================================
+/**
+ * \file
+ * \author Jonathan Holmes
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+#include "Vec2.h"
+#include <cmath>
+
+namespace Math
+{
+    ivec2::ivec2(const vec2& v) noexcept : x(static_cast<int>(v.x)), y(static_cast<int>(v.y))
+    {
+    }
+
+     ivec2& ivec2::operator+=(const ivec2& rhs) noexcept
+    {
+        x += rhs.x;
+        y += rhs.y;
+        return *this;
+    }
+
+     ivec2& ivec2::operator-=(const ivec2& rhs) noexcept
+    {
+        x -= rhs.x;
+        y -= rhs.y;
+        return *this;
+    }
+
+     ivec2& ivec2::operator*=(int scalar) noexcept
+    {
+        x *= scalar;
+        y *= scalar;
+        return *this;
+    }
+
+     ivec2& ivec2::operator/=(int scalar) noexcept
+    {
+        x /= scalar;
+        y /= scalar;
+        return *this;
+    }
+
+     ivec2 ivec2::operator+() const noexcept
+    {
+        ivec2 new_vec{ this->x, this->y };
+        return new_vec;
+    }
+
+     ivec2 ivec2::operator-() const noexcept
+    {
+        ivec2 new_vec{ -this->x, -this->y };
+        return new_vec;
+    }
+
+    double ivec2::Length()
+    {
+        return std::sqrt(x* x + y*y);
+    }
+
+     ivec2 operator+(const ivec2& lhs, const ivec2& rhs) noexcept
+    {
+        ivec2 new_vec{ lhs.x + rhs.x, lhs.y + rhs.y };
+        return new_vec;
+    }
+
+     ivec2 operator-(const ivec2& lhs, const ivec2& rhs) noexcept
+    {
+        ivec2 new_vec{ lhs.x - rhs.x, lhs.y - rhs.y };
+        return new_vec;
+    }
+
+     ivec2 operator*(const ivec2& v, int scalar) noexcept
+    {
+        ivec2 new_vec{ v.x * scalar, v.y * scalar };
+        return new_vec;
+    }
+
+     ivec2 operator*(int scalar, const ivec2& v) noexcept
+    {
+        ivec2 new_vec{ v.x * scalar, v.y * scalar };
+        return new_vec;
+    }
+    
+
+     ivec2 operator/(const ivec2& v, int scalar) noexcept
+    {
+        ivec2 new_vec{ v.x / scalar, v.y / scalar };
+        return new_vec;
+    }
+
+     bool operator==(const ivec2& lhs, const ivec2& rhs) noexcept
+    {
+        return (lhs.x == rhs.x) && (lhs.y == rhs.y);
+    }
+
+     bool operator!=(const ivec2& lhs, const ivec2& rhs) noexcept
+    {
+        return !(lhs == rhs);
+    }
+
+    std::ostream& operator<<(std::ostream& os, const ivec2& v)
+    {
+        os << v.x << ", " << v.y << "\n";
+        return os;
+    }
+
+    std::istream& operator>>(std::istream& is, ivec2& v)
+    {
+        is >> v.x >> v.y;
+        return is;
+    }
+
+    /*===============================ivec3==================================*/
+
+    ivec3::ivec3(const vec3& v) noexcept : x(static_cast<int>(v.x)), y(static_cast<int>(v.y)), z(static_cast<int>(v.z))
+    {
+    }
+
+     ivec3& ivec3::operator+=(const ivec3& rhs) noexcept
+    {
+        x += rhs.x;
+        y += rhs.y;
+        z += rhs.z;
+        return *this;
+    }
+
+     ivec3& ivec3::operator-=(const ivec3& rhs) noexcept
+    {
+        x -= rhs.x;
+        y -= rhs.y;
+        z -= rhs.z;
+        return *this;
+    }
+
+     ivec3& ivec3::operator*=(int scalar) noexcept
+    {
+        x *= scalar;
+        y *= scalar;
+        z *= scalar;
+        return *this;
+    }
+
+     ivec3& ivec3::operator/=(int scalar) noexcept
+    {
+        x /= scalar;
+        y /= scalar;
+        z /= scalar;
+        return *this;
+    }
+
+     ivec3 ivec3::operator+() const noexcept
+    {
+        ivec3 new_vec{ this->x, this->y, this->z };
+        return new_vec;
+    }
+
+     ivec3 ivec3::operator-() const noexcept
+    {
+        ivec3 new_vec{ -this->x, -this->y, -this->z };
+        return new_vec;
+    }
+
+    double ivec3::Length()
+    {
+        return std::sqrt(x*x + y*y + z*z);
+    }
+
+     ivec3 operator+(const ivec3& lhs, const ivec3& rhs) noexcept
+    {
+        ivec3 new_vec{ lhs.x + rhs.x, lhs.y + rhs.y, lhs.z + rhs.z };
+        return new_vec;
+    }
+
+     ivec3 operator-(const ivec3& lhs, const ivec3& rhs) noexcept
+    {
+        ivec3 new_vec{ lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z };
+        return new_vec;
+    }
+
+     ivec3 operator*(const ivec3& v, int scalar) noexcept
+    {
+        ivec3 new_vec{ v.x * scalar, v.y * scalar, v.z * scalar };
+        return new_vec;
+    }
+
+     ivec3 operator*(int scalar, const ivec3& v) noexcept
+    {
+        ivec3 new_vec{ v.x * scalar, v.y * scalar, v.z * scalar };
+        return new_vec;
+    }
+
+     ivec3 operator/(const ivec3& v, int scalar) noexcept
+    {
+        ivec3 new_vec{ v.x / scalar, v.y / scalar, v.z / scalar };
+        return new_vec;
+    }
+
+     bool operator==(const ivec3& lhs, const ivec3& rhs) noexcept
+    {
+        return (lhs.x == rhs.x) && (lhs.y == rhs.y) && (lhs.z == rhs.z);
+    }
+
+     bool operator!=(const ivec3& lhs, const ivec3& rhs) noexcept
+    {
+        return !(lhs == rhs);
+    }
+
+    std::ostream& operator<<(std::ostream& os, const ivec3& v)
+    {
+        os << v.x << ", " << v.y << v.z << "\n";
+        return os;
+    }
+
+    std::istream& operator>>(std::istream& is, ivec3& v)
+    {
+        is >> v.x >> v.y >> v.z;
+        return is;
+    }
+
+    /*===========================vec2=================================================*/
+     vec2& vec2::operator+=(const vec2& rhs) noexcept
+    {
+        x += rhs.x;
+        y += rhs.y;
+        return *this;
+    }
+
+     vec2& vec2::operator-=(const vec2& rhs) noexcept
+    {
+        x -= rhs.x;
+        y -= rhs.y;
+        return *this;
+    }
+
+     vec2& vec2::operator*=(int scalar) noexcept
+    {
+        x *= scalar;
+        y *= scalar;
+        return *this;
+    }
+
+     vec2& vec2::operator/=(int scalar) noexcept
+    {
+        x /= scalar;
+        y /= scalar;
+        return *this;
+    }
+
+     vec2 vec2::operator+() const noexcept
+    {
+        vec2 new_vec{ this->x, this->y };
+        return new_vec;
+    }
+
+     vec2 vec2::operator-() const noexcept
+    {
+        vec2 new_vec{ -this->x, -this->y };
+        return new_vec;
+    }
+
+     double vec2::Length() const noexcept
+    {
+        return std::sqrt(x*x + y*y);
+    }
+
+    vec2 vec2::Normalize()
+    {
+        vec2 normalized = {x/Length(),y/Length()};
+        return normalized;
+    }
+
+     vec2 operator+(const vec2& lhs, const vec2& rhs) noexcept
+    {
+        vec2 new_vec{ lhs.x + rhs.x, lhs.y + rhs.y };
+        return new_vec;
+    }
+
+     vec2 operator-(const vec2& lhs, const vec2& rhs) noexcept
+    {
+        vec2 new_vec{ lhs.x - rhs.x, lhs.y - rhs.y };
+        return new_vec;
+    }
+
+     vec2 operator*(const vec2& v, int scalar) noexcept
+    {
+        vec2 new_vec{ v.x * scalar, v.y * scalar };
+        return new_vec;
+    }
+
+     vec2 operator*(int scalar, const vec2& v) noexcept
+    {
+        vec2 new_vec{ v.x * scalar, v.y * scalar };
+        return new_vec;
+    }
+
+     vec2 operator*(const vec2& v, double scalar) noexcept
+    {
+        vec2 new_vec{ v.x * scalar, v.y * scalar };
+        return new_vec;
+    }
+
+     vec2 operator*(double scalar, const vec2& v) noexcept
+    {
+        vec2 new_vec{ v.x * scalar, v.y * scalar };
+        return new_vec;
+    }
+
+     vec2 operator/(const vec2& v, int scalar) noexcept
+    {
+        vec2 new_vec{ v.x / scalar, v.y / scalar };
+        return new_vec;
+    }
+
+     bool operator==(const vec2& lhs, const vec2& rhs) noexcept
+    {
+        return (lhs.x == rhs.x) && (lhs.y == rhs.y);
+    }
+
+     bool operator!=(const vec2& lhs, const vec2& rhs) noexcept
+    {
+        return !(lhs == rhs);
+    }
+
+    std::ostream& operator<<(std::ostream& os, const vec2& v)
+    {
+        os << v.x << ", " << v.y << "\n";
+        return os;
+    }
+
+    std::istream& operator>>(std::istream& is, vec2& v)
+    {
+        is >> v.x >> v.y;
+        return is;
+    }
+
+    /*===========================fvec2=================================================*/
+     fvec2& fvec2::operator+=(const fvec2& rhs) noexcept
+    {
+        x += rhs.x;
+        y += rhs.y;
+        return *this;
+    }
+
+     fvec2& fvec2::operator-=(const fvec2& rhs) noexcept
+    {
+        x -= rhs.x;
+        y -= rhs.y;
+        return *this;
+    }
+
+     fvec2& fvec2::operator*=(int scalar) noexcept
+    {
+        x *= static_cast<float>(scalar);
+        y *= static_cast<float>(scalar);
+        return *this;
+    }
+
+     fvec2& fvec2::operator/=(int scalar) noexcept
+    {
+        x /= static_cast<float>(scalar);
+        y /= static_cast<float>(scalar);
+        return *this;
+    }
+
+     fvec2 fvec2::operator+() const noexcept
+    {
+        fvec2 new_vec{ this->x, this->y };
+        return new_vec;
+    }
+
+     fvec2 fvec2::operator-() const noexcept
+    {
+        fvec2 new_vec{ -this->x, -this->y };
+        return new_vec;
+    }
+
+     float fvec2::Length() const noexcept
+    {
+        return std::sqrt(x*x + y*y);
+    }
+
+    fvec2 fvec2::Normalize()
+    {
+        fvec2 normalized = {x/Length(),y/Length()};
+        return normalized;
+    }
+
+     fvec2 operator+(const fvec2& lhs, const fvec2& rhs) noexcept
+    {
+        fvec2 new_vec{ lhs.x + rhs.x, lhs.y + rhs.y };
+        return new_vec;
+    }
+
+     fvec2 operator-(const fvec2& lhs, const fvec2& rhs) noexcept
+    {
+        fvec2 new_vec{ lhs.x - rhs.x, lhs.y - rhs.y };
+        return new_vec;
+    }
+
+     fvec2 operator*(const fvec2& v, int scalar) noexcept
+    {
+        fvec2 new_vec{ v.x * static_cast<float>(scalar), v.y * static_cast<float>(scalar) };
+        return new_vec;
+    }
+
+     fvec2 operator*(int scalar, const fvec2& v) noexcept
+    {
+        fvec2 new_vec{ v.x * static_cast<float>(scalar), v.y * static_cast<float>(scalar) };
+        return new_vec;
+    }
+
+     fvec2 operator*(const fvec2& v, float scalar) noexcept
+    {
+        fvec2 new_vec{ v.x * scalar, v.y * scalar };
+        return new_vec;
+    }
+
+     fvec2 operator*(float scalar, const fvec2& v) noexcept
+    {
+        fvec2 new_vec{ v.x * scalar, v.y * scalar };
+        return new_vec;
+    }
+
+     fvec2 operator/(const fvec2& v, int scalar) noexcept
+    {
+        fvec2 new_vec{ v.x / static_cast<float>(scalar), v.y / static_cast<float>(scalar) };
+        return new_vec;
+    }
+
+     bool operator==(const fvec2& lhs, const fvec2& rhs) noexcept
+    {
+        return (lhs.x == rhs.x) && (lhs.y == rhs.y);
+    }
+
+     bool operator!=(const fvec2& lhs, const fvec2& rhs) noexcept
+    {
+        return !(lhs == rhs);
+    }
+
+    std::ostream& operator<<(std::ostream& os, const fvec2& v)
+    {
+        os << v.x << ", " << v.y << "\n";
+        return os;
+    }
+
+    std::istream& operator>>(std::istream& is, fvec2& v)
+    {
+        is >> v.x >> v.y;
+        return is;
+    }
+
+	vec2 to_vec2(const fvec2& rhs)
+	{
+        return {static_cast<double>(rhs.x), static_cast<double>(rhs.y)};
+    }
+
+	vec2 to_vec2(const ivec2& rhs)
+	{
+		return {static_cast<double>(rhs.x), static_cast<double>(rhs.y)};
+	}
+
+	fvec2 to_fvec2(const vec2& rhs)
+	{
+        return {static_cast<float>(rhs.x), static_cast<float>(rhs.y)};
+    }
+
+	fvec2 to_fvec2(const ivec2& rhs)
+	{
+		return {static_cast<float>(rhs.x), static_cast<float>(rhs.y)};
+	}
+
+	ivec2 to_ivec2(const fvec2& rhs)
+	{
+		return {static_cast<int>(rhs.x), static_cast<int>(rhs.y)};
+	}
+
+	ivec2 to_ivec2(const vec2& rhs)
+	{
+		return {static_cast<int>(rhs.x), static_cast<int>(rhs.y)};
+	}
+
+	/*===============================vec3==================================*/
+     vec3& vec3::operator+=(const vec3& rhs) noexcept
+    {
+        x += rhs.x;
+        y += rhs.y;
+        z += rhs.z;
+        return *this;
+    }
+
+     vec3& vec3::operator-=(const vec3& rhs) noexcept
+    {
+        x -= rhs.x;
+        y -= rhs.y;
+        z -= rhs.z;
+        return *this;
+    }
+
+     vec3& vec3::operator*=(int scalar) noexcept
+    {
+        x *= scalar;
+        y *= scalar;
+        z *= scalar;
+        return *this;
+    }
+
+     vec3& vec3::operator/=(int scalar) noexcept
+    {
+        x /= scalar;
+        y /= scalar;
+        z /= scalar;
+        return *this;
+    }
+
+     vec3 vec3::operator+() const noexcept
+    {
+        vec3 new_vec{ this->x, this->y, this->z };
+        return new_vec;
+    }
+
+     vec3 vec3::operator-() const noexcept
+    {
+        vec3 new_vec{ -this->x, -this->y, -this->z };
+        return new_vec;
+    }
+
+    double vec3::Length()
+    {
+        return std::sqrt(x*x + y*y + z*z);
+    }
+
+     vec3 operator+(const vec3& lhs, const vec3& rhs) noexcept
+    {
+        vec3 new_vec{ lhs.x + rhs.x, lhs.y + rhs.y, lhs.z + rhs.z };
+        return new_vec;
+    }
+
+     vec3 operator-(const vec3& lhs, const vec3& rhs) noexcept
+    {
+        vec3 new_vec{ lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z };
+        return new_vec;
+    }
+
+     vec3 operator*(const vec3& v, int scalar) noexcept
+    {
+        vec3 new_vec{ v.x * scalar, v.y * scalar, v.z * scalar };
+        return new_vec;
+    }
+
+     vec3 operator*(int scalar, const vec3& v) noexcept
+    {
+        vec3 new_vec{ v.x * scalar, v.y * scalar, v.z * scalar };
+        return new_vec;
+    }
+
+     vec3 operator/(const vec3& v, int scalar) noexcept
+    {
+        vec3 new_vec{ v.x / scalar, v.y / scalar, v.z / scalar };
+        return new_vec;
+    }
+
+     bool operator==(const vec3& lhs, const vec3& rhs) noexcept
+    {
+        return (lhs.x == rhs.x) && (lhs.y == rhs.y) && (lhs.z == rhs.z);
+    }
+
+     bool operator!=(const vec3& lhs, const vec3& rhs) noexcept
+    {
+        return !(lhs == rhs);
+    }
+
+    std::ostream& operator<<(std::ostream& os, const vec3& v)
+    {
+        os << v.x << ", " << v.y << v.z << "\n";
+        return os;
+    }
+
+    std::istream& operator>>(std::istream& is, vec3& v)
+    {
+        is >> v.x >> v.y >> v.z;
+        return is;
+    }
+}
+
+
+

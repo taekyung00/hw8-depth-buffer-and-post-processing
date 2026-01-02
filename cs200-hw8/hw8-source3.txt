@@ -1,0 +1,1846 @@
+================================================
+FILE: source/CS200/Shape.cpp
+================================================
+#include "Shape.h"
+#include "CS200/RGBA.h"
+#include "CS200/Renderer2DUtils.h"
+#include "Engine/Path.h"
+#include "OpenGL/GL.h"
+#include <span>
+
+namespace CS230
+{
+  Shape::Shape(PrimitivePattern pattern, std::span<const Vertex> vertices)
+  {
+	setup(pattern, /* WhiteTexture() */ OpenGL::CreateTextureFromMemory({ 1, 1 }, std::array<CS200::RGBA, 1>{ CS200::WHITE }), vertices);
+  }
+
+  Shape::Shape(PrimitivePattern pattern, OpenGL::TextureHandle texture, std::span<const Vertex> vertices)
+  {
+	setup(pattern, texture, vertices);
+  }
+
+  Shape::~Shape()
+  {
+	GL::DeleteBuffers(1, &vertexBuffer), vertexBuffer				 = 0;
+	GL::DeleteTextures(1, &textureHandle), textureHandle			 = 0;
+	GL::DeleteVertexArrays(1, &vertexArrayObject), vertexArrayObject = 0;
+	OpenGL::DestroyShader(shapeShader);
+  }
+
+  Shape::Shape(Shape&& other) noexcept
+	  : vertexBuffer(other.vertexBuffer), vertexArrayObject(other.vertexArrayObject), textureHandle(other.textureHandle), shapeShader(std::move(other.shapeShader)), primitivePattern(other.primitivePattern),
+		vertexCount(other.vertexCount)
+  {
+	other.vertexBuffer		= 0;
+	other.vertexArrayObject = 0;
+	other.textureHandle		= 0;
+	other.vertexCount		= 0;
+	other.shapeShader		= {};
+  }
+
+  Shape& Shape::operator=(Shape&& other) noexcept
+  {
+	std::swap(vertexBuffer, other.vertexBuffer);
+	std::swap(vertexArrayObject, other.vertexArrayObject);
+	std::swap(textureHandle, other.textureHandle);
+	std::swap(primitivePattern, other.primitivePattern);
+	std::swap(vertexCount, other.vertexCount);
+	std::swap(shapeShader, other.shapeShader);
+	return *this;
+  }
+
+  void Shape::Draw(Math::TransformationMatrix model_matrix, unsigned int color, float depth) const noexcept
+  {
+	GL::UseProgram(shapeShader.Shader);
+
+	const auto&				   locations			 = shapeShader.UniformLocations;
+	Math::TransformationMatrix anchored_model_matrix = model_matrix * Math::TranslationMatrix(Math::vec2{ 0.5, 0.5 });
+	const auto				   model_matrix_opengl	 = CS200::Renderer2DUtils::to_opengl_mat3(anchored_model_matrix);
+	GL::UniformMatrix3fv(locations.at("uTransform"), 1, GL_FALSE, model_matrix_opengl.data());
+	GL::Uniform4fv(locations.at("uTint"), 1, CS200::unpack_color(color).data());
+	GL::Uniform1f(locations.at("uDepth"), depth);
+
+	GL::ActiveTexture(GL_TEXTURE0);
+	GL::BindTexture(GL_TEXTURE_2D, textureHandle);
+	GL::BindVertexArray(vertexArrayObject);
+
+	GL::DrawArrays(static_cast<GLenum>(primitivePattern), 0, vertexCount);
+
+	GL::BindTexture(GL_TEXTURE_2D, 0);
+	GL::BindVertexArray(0);
+	GL::UseProgram(0);
+  }
+
+  void Shape::setup(PrimitivePattern pattern, OpenGL::TextureHandle texture, std::span<const Vertex> vertices)
+  {
+	shapeShader		 = OpenGL::CreateShader(assets::locate_asset("Assets/shaders/shape/shape.vert"), assets::locate_asset("Assets/shaders/shape/shape.frag"));
+	primitivePattern = pattern;
+	textureHandle	 = texture;
+	vertexCount		 = static_cast<GLsizei>(vertices.size());
+
+	// Create vertex buffer
+	vertexBuffer = OpenGL::CreateBuffer(OpenGL::BufferType::Vertices, std::as_bytes(vertices));
+
+	// no index buffer this time
+
+	// Create vertex array object
+	const auto layout = {
+	  OpenGL::VertexBuffer{ vertexBuffer, { OpenGL::Attribute::Float2, OpenGL::Attribute::Float2 } }
+	};
+	vertexArrayObject = OpenGL::CreateVertexArrayObject(layout);
+  }
+}
+
+
+
+================================================
+FILE: source/CS200/Shape.h
+================================================
+#pragma once
+
+#include "OpenGL/Buffer.h"
+#include "OpenGL/Shader.h"
+#include "OpenGL/Texture.h"
+#include "OpenGL/VertexArray.h"
+
+#include "Engine/Component.h"
+#include "Engine/Matrix.h"
+
+#include <GL/glew.h>
+#include <array>
+#include <memory>
+#include <span>
+
+namespace CS230
+{
+	class Shape : public Component
+	{
+	public:
+		enum class PrimitivePattern : GLenum
+		{
+			Points		  = GL_POINTS,
+			Lines		  = GL_LINES,
+			LineStrip	  = GL_LINE_STRIP,
+			LineLoop	  = GL_LINE_LOOP,
+			Triangles	  = GL_TRIANGLES,
+			TriangleStrip = GL_TRIANGLE_STRIP,
+			TriangleFan	  = GL_TRIANGLE_FAN
+		};
+
+		struct Vertex
+		{
+			float						 x = 0, y = 0; //layout1
+			float						 s = 0, t = 0; //layout2
+			// std::array<unsigned char, 4> tint{ 255, 255, 255, 255 }; //layout3
+
+			constexpr Vertex() noexcept = default;
+
+			constexpr Vertex(float x_, float y_, float s_, float t_) noexcept : x(x_), y(y_), s(s_), t(t_)
+			{
+			}
+
+			constexpr Vertex(float x_, float y_) noexcept : Vertex(x_, y_, 0.0f, 0.0f)
+			{
+			}
+
+
+		};
+
+	public:
+		Shape(PrimitivePattern pattern, std::span<const Vertex> vertices);
+		Shape(PrimitivePattern pattern, OpenGL::TextureHandle texture, std::span<const Vertex> vertices);
+
+		~Shape();
+		Shape(const Shape&)			   = delete;
+		Shape& operator=(const Shape&) = delete;
+		Shape(Shape&& other) noexcept;
+		Shape& operator=(Shape&& other) noexcept;
+
+		void Draw(Math::TransformationMatrix model_matrix, unsigned int color = 0xFFFFFFFF, float depth = 0.5f) const noexcept;
+
+
+	private:
+		OpenGL::BufferHandle	  vertexBuffer		= 0;
+		OpenGL::VertexArrayHandle vertexArrayObject = 0;
+		OpenGL::TextureHandle	  textureHandle		= 0;
+		OpenGL::CompiledShader	  shapeShader{};
+		PrimitivePattern		  primitivePattern = PrimitivePattern::Triangles;
+		GLsizei					  vertexCount	   = 0;
+
+	private:
+		void setup(PrimitivePattern pattern, OpenGL::TextureHandle texture, std::span<const Vertex> vertices);
+	};
+}
+
+
+
+================================================
+FILE: source/Demo/DemoDepthPost.cpp
+================================================
+/**
+ * \file
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#include "Demo/DemoDepthPost.h"
+#include "DemoDepthPost.h"
+#include "Engine/TextureManager.h"
+#include <algorithm>
+#include <random>
+
+#include "Engine/Collision.h"
+#include "Engine/Input.h"
+#include "Engine/Path.h"
+#include "Engine/Random.h"
+#include "Engine/TextureManager.h"
+#include "Engine/Timer.h"
+#include "Engine/Window.h"
+#include <imgui.h>
+
+#include "CS200/IRenderer2D.h"
+#include "CS200/ImGuiHelper.h"
+#include "CS200/NDC.h"
+#include "CS200/RenderingAPI.h"
+
+#include "OpenGL/Buffer.h"
+#include "OpenGL/Environment.h"
+#include "OpenGL/GL.h"
+
+#include "Game/MainMenu.h"
+
+void DemoDepthPost::setupScreenTriangle()
+{
+	struct ScreenVertex
+	{
+		float x, y;
+		float u, v;
+	};
+
+	const ScreenVertex vertices[] = {
+		{ -1.0f, -1.0f, 0.0f, 0.0f },
+		{  3.0f, -1.0f, 2.0f, 0.0f },
+		{ -1.0f,	 3.0f, 0.0f, 2.0f },
+	};
+
+	screenVertexCount = static_cast<GLsizei>(std::ssize(vertices));
+
+	screenVBO = OpenGL::CreateBuffer(OpenGL::BufferType::Vertices, std::as_bytes(std::span{ vertices }));
+
+	const auto layout = {
+		OpenGL::VertexBuffer{ screenVBO,
+							  {
+								  OpenGL::Attribute::Float2, // Location 0: Position (x, y)
+								  OpenGL::Attribute::Float2	 // Location 1: TexCoord (u, v)
+							  } }
+	};
+
+	screenVAO = OpenGL::CreateVertexArrayObject(layout);
+}
+
+void DemoDepthPost::Load()
+{
+	// #if !defined(__EMSCRIPTEN__)
+	Engine::GetWindow().ForceResize(default_window_size.x, default_window_size.y);
+	Engine::GetWindow().SetWindowPosition(SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+	// #endif
+
+	auto& texture_manager = Engine::GetTextureManager();
+	for (size_t i = 0; i < NUM_LAYERS; ++i)
+	{
+		background_layers[i].texture = texture_manager.Load("Assets/images/DemoDepthPost/background_" + std::to_string(i) + ".png");
+		background_layers[i].depth	 = static_cast<float>(i) / NUM_LAYERS; // Depth from 0.0, 0.125, ..., 0.875
+	}
+	CS200::RenderingAPI::SetClearColor(CS200::WHITE);
+
+	texture_manager.SwitchRenderer(CS230::TextureManager::RendererType::Batch);
+
+	// Initialize FPS tracking
+	LastTicks = SDL_GetTicks();
+
+	// Initialize ducks
+	duck_texture = texture_manager.Load("Assets/images/DemoDepthPost/duck.png");
+	for (size_t i = 0; i < NUM_DUCKS; ++i)
+	{
+#if defined(__EMSCRIPTEN__)
+		ducks[i].position = { static_cast<double>(util::random(500, 900)), static_cast<double>(util::random(500, 800)) };
+#else
+		Math::ivec2 window_size = Engine::GetWindow().GetSize();
+		ducks[i].position = { static_cast<double>(util::random(100, window_size.x - 100)), static_cast<double>(util::random(100, window_size.y - 100)) };
+#endif
+		uint8_t r	   = static_cast<uint8_t>(util::random(256));
+		uint8_t g	   = static_cast<uint8_t>(util::random(256));
+		uint8_t b	   = static_cast<uint8_t>(util::random(256));
+		uint8_t a	   = static_cast<uint8_t>(util::random(100, 250)); // get transparency between 100 and 250
+		ducks[i].color = CS200::pack_color(std::array<uint8_t, 4>{ r, g, b, a });
+		ducks[i].depth = static_cast<float>(util::random(-0.9, -0.1)); // Depth between -0.9 to -0.1
+	}
+
+	// sort ducks by depth back to front(painter's algorithm)
+	std::sort(std::begin(ducks), std::end(ducks), [](const Duck& left, const Duck& right) { return left.depth > right.depth; });
+
+	// msaa settings
+	const auto use_msaa = useMSAA ? OffscreenFramebuffer::MSAA::True : OffscreenFramebuffer::MSAA::False;
+	offscreenBuffer.Initialize(default_window_size.x, default_window_size.y, use_msaa, MSAASamples);
+
+	const std::filesystem::path screen_vert = assets::locate_asset("Assets/shaders/PostProcess/simple.vert");
+	const std::filesystem::path screen_frag = assets::locate_asset("Assets/shaders/PostProcess/simple-texture.frag");
+	screenShader							= OpenGL::CreateShader(screen_vert, screen_frag);
+
+	setupScreenTriangle();
+
+	postProcessing.Initialize(default_window_size.x, default_window_size.y);
+
+	{
+		const std::filesystem::path box_blur_vert	= assets::locate_asset("Assets/shaders/PostProcess/simple.vert");
+		const std::filesystem::path box_blur_frag	= assets::locate_asset("Assets/shaders/PostProcess/box-blur.frag");
+		auto						box_blur_shader = OpenGL::CreateShader(box_blur_vert, box_blur_frag);
+
+		postProcessing.AddEffect(PostProcessingEffect(
+			"Box Blur", PostProcessingEffect::Enable::False, box_blur_shader,
+			[&](const OpenGL::CompiledShader& shader)
+			{
+				GL::Uniform1i(shader.UniformLocations.at("uBlurSize"), static_cast<int>(boxBlurSize));
+				GL::Uniform1f(shader.UniformLocations.at("uSeparation"), boxBlurSeparation);
+			}));
+	}
+
+
+	{
+		const std::filesystem::path chroma_vert	  = assets::locate_asset("Assets/shaders/PostProcess/simple.vert");
+		const std::filesystem::path chroma_frag	  = assets::locate_asset("Assets/shaders/PostProcess/chromatic-aberration.frag");
+		auto						chroma_shader = OpenGL::CreateShader(chroma_vert, chroma_frag);
+
+		postProcessing.AddEffect(PostProcessingEffect(
+			"Chromatic Aberration", PostProcessingEffect::Enable::False, chroma_shader,
+			[&](const OpenGL::CompiledShader& shader) { GL::Uniform2f(shader.UniformLocations.at("uMouseFocusPoint"), chromaticAberrationMouseX, chromaticAberrationMouseY); }));
+	}
+	{
+		const std::filesystem::path pixel_vert	 = assets::locate_asset("Assets/shaders/PostProcess/simple.vert");
+		const std::filesystem::path pixel_frag	 = assets::locate_asset("Assets/shaders/PostProcess/pixelize.frag");
+		auto						pixel_shader = OpenGL::CreateShader(pixel_vert, pixel_frag);
+
+		postProcessing.AddEffect(PostProcessingEffect(
+			"Pixelization", PostProcessingEffect::Enable::False, pixel_shader,
+			[&](const OpenGL::CompiledShader& shader) { GL::Uniform1i(shader.UniformLocations.at("pixelSize"), pixelSize); })); // must be odd
+	}
+
+	{
+		const std::filesystem::path gamma_vert	 = assets::locate_asset("Assets/shaders/PostProcess/simple.vert");
+		const std::filesystem::path gamma_frag	 = assets::locate_asset("Assets/shaders/PostProcess/gamma-correct.frag");
+		auto						gamma_shader = OpenGL::CreateShader(gamma_vert, gamma_frag);
+
+		postProcessing.AddEffect(PostProcessingEffect(
+			"Gamma Correction", PostProcessingEffect::Enable::False, gamma_shader, [&](const OpenGL::CompiledShader& shader) { GL::Uniform1f(shader.UniformLocations.at("uGamma"), gammaValue); }));
+	}
+
+	GL::Enable(GL_BLEND);
+	GL::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	if (useMSAA)
+	{
+		GL::Enable(GL_MULTISAMPLE);
+	}
+}
+
+void DemoDepthPost::Update([[maybe_unused]] double dt)
+{
+	// Update FPS tracker
+	const Uint32 currentTicks = SDL_GetTicks();
+	const Uint32 deltaTicks	  = currentTicks - LastTicks;
+	const double deltaSeconds = deltaTicks / 1000.0;
+	LastTicks				  = currentTicks;
+	FPSTracker.Update(deltaSeconds);
+
+	if (Engine::GetInput().KeyJustReleased(CS230::Input::Keys::Escape))
+	{
+		Engine::GetGameStateManager().PopState();
+		Engine::GetGameStateManager().PushState<MainMenu>();
+	}
+}
+
+void DemoDepthPost::Unload()
+{
+	offscreenBuffer.Shutdown();
+	postProcessing.Shutdown();
+	if (screenVAO != 0)
+	{
+		GL::DeleteVertexArrays(1, &screenVAO);
+		screenVAO = 0;
+	}
+	if (screenVBO != 0)
+	{
+		GL::DeleteBuffers(1, &screenVBO);
+		screenVBO = 0;
+	}
+	if (screenShader.Shader != 0)
+	{
+		OpenGL::DestroyShader(screenShader);
+	}
+}
+
+void DemoDepthPost::Draw()
+{
+	static int		  last_width  = 0;
+	static int		  last_height = 0;
+	const Math::ivec2 window_size = Engine::GetWindow().GetSize();
+	ratio						  = static_cast<double>(window_size.x) / default_window_size.x;
+#if defined(__EMSCRIPTEN__)
+	ratio = 0.3;
+#endif
+	if (window_size.x != last_width || window_size.y != last_height)
+	{
+		offscreenBuffer.Resize(window_size.x, window_size.y);
+		postProcessing.Resize(window_size.x, window_size.y);
+		last_width	= window_size.x;
+		last_height = window_size.y;
+	}
+	// 1. Render to Offscreen FBO
+	GL::Enable(GL_DEPTH_TEST);
+	offscreenBuffer.BindForRendering();
+	CS200::IRenderer2D* renderer_2d = Engine::GetTextureManager().GetRenderer2D();
+	renderer_2d->BeginScene(CS200::build_ndc_matrix(window_size));
+
+
+	CS200::RenderingAPI::Clear(); // Clear Color & Depth
+
+	// opaque background layers
+	GL::DepthMask(GL_TRUE); // enable depth write
+	GL::DepthFunc(GL_LESS); // set depth function to less
+
+	CS200::RenderingAPI::SetViewport(window_size, { 0, 0 });
+
+	for (const auto& layer : background_layers)
+	{
+		layer.texture->Draw(Math::TransformationMatrix() * Math::ScaleMatrix(ratio), 0xFFFFFFFF, layer.depth);
+	}
+
+	// transparent ducks
+	GL::DepthMask(GL_FALSE); // disable depth write
+	for (const auto& duck : ducks)
+	{
+#if defined(__EMSCRIPTEN__)
+		duck_texture->Draw(Math::TranslationMatrix(Math::vec2{ -500, -500 }) * Math::TranslationMatrix(duck.position) * Math::ScaleMatrix(ratio), duck.color, duck.depth);
+#else
+		duck_texture->Draw(Math::TranslationMatrix(duck.position) * Math::ScaleMatrix(ratio), duck.color, duck.depth);
+#endif
+	}
+	GL::DepthMask(GL_TRUE); // enable depth write
+	renderer_2d->EndScene();
+
+	// 2. Resolve (MSAA -> Texture) & PostProcess
+	OpenGL::TextureHandle scene_texture = offscreenBuffer.GetTexture();
+	OpenGL::TextureHandle final_texture = scene_texture;
+
+	GL::Disable(GL_DEPTH_TEST);
+	if (enablePostFX)
+	{
+		final_texture = postProcessing.Apply(scene_texture);
+	}
+
+	// 3. Render Final Texture to Screen
+	GL::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	GL::Viewport(0, 0, default_window_size.x, default_window_size.y);
+
+
+	GL::UseProgram(screenShader.Shader);
+
+	GL::ActiveTexture(GL_TEXTURE0);
+	GL::BindTexture(GL_TEXTURE_2D, final_texture);
+
+	if (screenShader.UniformLocations.count("uColorTexture"))
+	{
+		GL::Uniform1i(screenShader.UniformLocations.at("uColorTexture"), 0);
+	}
+
+	GL::BindVertexArray(screenVAO);
+	GL::DrawArrays(GL_TRIANGLES, 0, screenVertexCount);
+
+	GL::BindVertexArray(0);
+	GL::BindTexture(GL_TEXTURE_2D, 0);
+	GL::UseProgram(0);
+
+
+	GL::Enable(GL_DEPTH_TEST);
+	renderer_2d->EndScene();
+}
+
+void DemoDepthPost::DrawImGui()
+{
+	ImGui::Begin("Demo Depth & Post-Processing Controls");
+	// Display FPS at the top
+	ImGui::Text("FPS: %d", static_cast<int>(FPSTracker));
+	ImGui::Separator();
+
+	ImGui::SeparatorText("Depth Settings");
+
+	if (ImGui::Button("Sort as Painters Algorithm"))
+	{
+		std::sort(std::begin(background_layers), std::end(background_layers), [](const BackGroundLayer& left, const BackGroundLayer& right) { return left.depth > right.depth; });
+	}
+
+	if (ImGui::Button("Sort as Front to Back"))
+	{
+		std::sort(
+			std::begin(background_layers), std::end(background_layers),
+			[](const BackGroundLayer& left, const BackGroundLayer& right)
+			{
+				return left.depth < right.depth; // then smaller depth drawn first, and frag of larger depth gonna be skipped over by depth test, and hopefully save effort of fragment shader
+			});
+	}
+
+	if (ImGui::Button("Sort Randomly"))
+	{
+		std::random_device rd;
+		std::mt19937	   g(rd());
+		std::shuffle(std::begin(background_layers), std::end(background_layers), g);
+	}
+	ImGui::SeparatorText("MSAA Settings");
+	bool msaa_changed = ImGui::Checkbox("Enable MSAA", &useMSAA);
+
+	ImGui::BeginDisabled(!useMSAA);
+
+
+	static GLint max_msaa_samples = 0;
+	if (max_msaa_samples == 0)
+	{
+		GL::GetIntegerv(GL_MAX_SAMPLES, &max_msaa_samples);
+	}
+
+
+	static std::vector<int> valid_samples;
+	if (valid_samples.empty())
+	{
+		for (int samples = 2; samples <= max_msaa_samples; samples *= 2)
+		{
+			valid_samples.push_back(samples);
+		}
+	}
+
+
+	int current_index = 0;
+	for (size_t i = 0; i < valid_samples.size(); ++i)
+	{
+		if (valid_samples[i] == MSAASamples)
+		{
+			current_index = static_cast<int>(i);
+			break;
+		}
+	}
+
+
+	std::string preview = std::to_string(MSAASamples) + "x";
+	if (ImGui::BeginCombo("MSAA Samples", preview.c_str()))
+	{
+		for (size_t i = 0; i < valid_samples.size(); ++i)
+		{
+			bool		is_selected = (current_index == static_cast<int>(i));
+			std::string label		= std::to_string(valid_samples[i]) + "x";
+
+			if (ImGui::Selectable(label.c_str(), is_selected))
+			{
+				MSAASamples	 = valid_samples[i];
+				msaa_changed = true;
+			}
+
+			if (is_selected)
+			{
+				ImGui::SetItemDefaultFocus();
+			}
+		}
+		ImGui::EndCombo();
+	}
+
+	ImGui::EndDisabled();
+
+	if (msaa_changed)
+	{
+		const auto use_msaa = useMSAA ? OffscreenFramebuffer::MSAA::True : OffscreenFramebuffer::MSAA::False;
+		offscreenBuffer.SetMSAA(use_msaa, MSAASamples);
+
+		MSAASamples = offscreenBuffer.GetMSAASamples();
+
+		if (useMSAA)
+		{
+			GL::Enable(GL_MULTISAMPLE);
+		}
+		else
+		{
+			GL::Disable(GL_MULTISAMPLE);
+		}
+	}
+
+	ImGui::SeparatorText("Post-Processing Effects");
+	ImGui::Checkbox("Enable Post-FX", &enablePostFX);
+
+	ImGui::BeginDisabled(!enablePostFX);
+
+
+	if (auto* box_blur = postProcessing.GetEffect("Box Blur"))
+	{
+		ImGui::Checkbox(box_blur->Name.c_str(), reinterpret_cast<bool*>(&box_blur->Enabled));
+
+		ImGui::BeginDisabled(box_blur->Enabled == PostProcessingEffect::Enable::False);
+		ImGui::Indent();
+		ImGui::SliderFloat("Blur Size", &boxBlurSize, 0.0f, 10.0f);
+		ImGui::SliderFloat("Blur Separation", &boxBlurSeparation, 1.0f, 5.0f);
+		ImGui::Unindent();
+		ImGui::EndDisabled();
+	}
+
+
+	if (auto* gamma = postProcessing.GetEffect("Gamma Correction"))
+	{
+		ImGui::Checkbox(gamma->Name.c_str(), reinterpret_cast<bool*>(&gamma->Enabled));
+
+		ImGui::BeginDisabled(gamma->Enabled == PostProcessingEffect::Enable::False);
+		ImGui::Indent();
+		ImGui::SliderFloat("Gamma", &gammaValue, 0.5f, 4.0f);
+		ImGui::Unindent();
+		ImGui::EndDisabled();
+	}
+
+
+	if (auto* chroma = postProcessing.GetEffect("Chromatic Aberration"))
+	{
+		ImGui::Checkbox(chroma->Name.c_str(), reinterpret_cast<bool*>(&chroma->Enabled));
+
+		ImGui::BeginDisabled(chroma->Enabled == PostProcessingEffect::Enable::False);
+		ImGui::Indent();
+		ImGui::SliderFloat("Focus X", &chromaticAberrationMouseX, 0.0f, 1.0f);
+		ImGui::SliderFloat("Focus Y", &chromaticAberrationMouseY, 0.0f, 1.0f);
+		ImGui::Unindent();
+		ImGui::EndDisabled();
+	}
+
+	if (auto* pixelization = postProcessing.GetEffect("Pixelization"))
+	{
+		ImGui::Checkbox(pixelization->Name.c_str(), reinterpret_cast<bool*>(&pixelization->Enabled));
+
+		ImGui::BeginDisabled(pixelization->Enabled == PostProcessingEffect::Enable::False);
+		ImGui::SliderInt("Pixel Size", &pixelSize, 1, 800);
+		if ((pixelSize & 1) == 0)
+		{
+			pixelSize += 1; // make sure it's odd
+		}
+		// ImGui::Indent();
+		// ImGui::Unindent();
+		ImGui::EndDisabled();
+	}
+
+	ImGui::EndDisabled();
+
+	ImGui::SeparatorText("Render Textures");
+
+
+	static int		   selected_effect_index = -1;
+	static const char* effect_names[]		 = { "Box Blur", "Gamma Correction", "Chromatic Aberration", "Pixelization" };
+	static const char* current_effect_name	 = "None";
+
+	if (selected_effect_index >= 0 && selected_effect_index < 4)
+	{
+		current_effect_name = effect_names[selected_effect_index];
+	}
+
+	if (ImGui::BeginCombo("View Effect", current_effect_name))
+	{
+		if (ImGui::Selectable("None", selected_effect_index == -1))
+		{
+			selected_effect_index = -1;
+		}
+
+		for (int i = 0; i < 4; i++)
+		{
+			bool is_selected = (selected_effect_index == i);
+			if (ImGui::Selectable(effect_names[i], is_selected))
+			{
+				selected_effect_index = i;
+			}
+			if (is_selected)
+			{
+				ImGui::SetItemDefaultFocus();
+			}
+		}
+		ImGui::EndCombo();
+	}
+
+
+	if (enablePostFX && selected_effect_index >= 0 && selected_effect_index < 4)
+	{
+		if (auto* effect = postProcessing.GetEffect(effect_names[selected_effect_index]))
+		{
+			if (effect->Enabled == PostProcessingEffect::Enable::True && effect->Framebuffer)
+			{
+				ImGui::Text("Output Texture (%s):", effect->Name.c_str());
+				OpenGL::TextureHandle texture = effect->Framebuffer->GetTexture();
+
+				const float		aspect_ratio   = static_cast<float>(default_window_size.x) / static_cast<float>(default_window_size.y);
+				constexpr float display_width  = 400.0f;
+				const float		display_height = display_width / aspect_ratio;
+
+				ImGui::Image(static_cast<ImTextureRef>(texture), ImVec2(display_width, display_height), ImVec2(0, 1), ImVec2(1, 0));
+			}
+			else if (effect->Enabled == PostProcessingEffect::Enable::False)
+			{
+				ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "Effect is disabled");
+			}
+		}
+	}
+	ImGui::End();
+}
+
+
+
+================================================
+FILE: source/Demo/DemoDepthPost.h
+================================================
+/**
+ * \file
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+#include <SDL.h>
+
+#include "Engine/FPS.h"
+#include "Engine/GameObjectManager.h"
+#include "Engine/GameState.h"
+#include "Engine/Particle.h"
+#include "Engine/Vec2.h"
+
+#include "CS200/OffscreenFramebuffer.h"
+#include "CS200/PostProcessingPipeline.h"
+#include "OpenGL/VertexArray.h"
+
+class DemoDepthPost : public CS230::GameState
+{
+public:
+	DemoDepthPost() = default;
+	void Load() override;
+	void Update(double dt) override;
+	void Unload() override;
+	void Draw() override;
+	void DrawImGui() override;
+
+	gsl::czstring GetName() const override
+	{
+		return "Demo Depth & Post-Processing";
+	}
+
+private:
+	struct BackGroundLayer
+	{
+		std::shared_ptr<CS230::Texture> texture;
+		float							depth;
+	};
+
+	static constexpr size_t					NUM_LAYERS = 8;
+	std::array<BackGroundLayer, NUM_LAYERS> background_layers{};
+	static constexpr Math::ivec2			default_window_size{ 1920, 1080 };
+	inline static double ratio = 1.0;
+
+	struct Duck
+	{
+		Math::vec2	position;
+		CS200::RGBA color;
+		float		depth;
+	};
+
+	std::shared_ptr<CS230::Texture> duck_texture;
+
+	static constexpr size_t		NUM_DUCKS = 10;
+	std::array<Duck, NUM_DUCKS> ducks{};
+
+	util::FPS FPSTracker;
+	Uint32	  LastTicks = 0;
+
+	// msaa, post-processing
+	bool				 useMSAA = true;
+	OffscreenFramebuffer offscreenBuffer{};
+	int					 MSAASamples = 4;
+
+	OpenGL::CompiledShader	  screenShader{};
+	OpenGL::BufferHandle	  screenVBO{};
+	OpenGL::VertexArrayHandle screenVAO{};
+	GLsizei					  screenVertexCount = 0;
+
+	void setupScreenTriangle();
+
+	PostProcessingPipeline postProcessing{};
+
+	bool enablePostFX = true;
+
+
+	float boxBlurSize				= 2.0f;
+	float boxBlurSeparation			= 1.0f;
+	float gammaValue				= 2.2f;
+	float chromaticAberrationMouseX = 0.5f;
+	float chromaticAberrationMouseY = 0.5f;
+	int	  pixelSize					= 5;
+};
+
+
+================================================
+FILE: source/Engine/Animation.cpp
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Animation.cpp
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    April 16, 2025
+*/
+#include "Animation.h"
+#include "Logger.h"
+#include "Path.h"
+
+CS230::Animation::Animation(const std::filesystem::path& animation_file) : current_command(0)
+{
+    const std::filesystem::path anm_path = assets::locate_asset(animation_file);
+
+    if (anm_path.extension() != ".anm")
+    {
+        throw std::runtime_error(animation_file.generic_string() + " is not a .anm file");
+    }
+
+
+    std::ifstream in_file(anm_path);
+    if (in_file.is_open() == false)
+    {
+        throw std::runtime_error("Failed to load " + animation_file.generic_string());
+    }
+
+    std::string command;
+    while (in_file.eof() == false)
+    {
+        in_file >> command;
+        if (command == "PlayFrame")
+        {
+            size_t frame;
+            float  target_time;
+            in_file >> frame;
+            in_file >> target_time;
+
+            commands.push_back(new PlayFrame(frame, static_cast<double>(target_time)));
+        }
+        else if (command == "Loop")
+        {
+            size_t loop_to_frame;
+            in_file >> loop_to_frame;
+            commands.push_back(new Loop(loop_to_frame));
+        }
+        else if (command == "End")
+        {
+            commands.push_back(new End());
+        }
+        else
+        {
+            Engine::GetLogger().LogError(command + " in " + animation_file.generic_string());
+        }
+    }
+    Reset();
+}
+
+CS230::Animation::Animation() : Animation("./Assets/animations/None.anm")
+{
+}
+
+CS230::Animation::~Animation()
+{
+    for (Command* command : commands)
+    {
+        delete command;
+    }
+    commands.clear();
+}
+
+void CS230::Animation::Update(double dt)
+{
+    current_frame->Update(dt);
+    if (current_frame->Ended() == true)
+    {
+        current_frame->ResetTime();
+        current_command++;
+        if (commands[current_command]->Type() == CommandType::PlayFrame)
+        {
+            current_frame = static_cast<PlayFrame*>(commands[current_command]);
+        }
+        else if (commands[current_command]->Type() == CommandType::Loop)
+        {
+            Loop* loop_data = static_cast<Loop*>(commands[current_command]);
+            current_command = loop_data->LoopIndex();
+            if (commands[current_command]->Type() == CommandType::PlayFrame)
+            {
+                current_frame = static_cast<PlayFrame*>(commands[current_command]);
+            }
+            else
+            {
+                Engine::GetLogger().LogError("Loop does not go to PlayFrame");
+                Reset();
+            }
+        }
+        else if (commands[current_command]->Type() == CommandType::End)
+        {
+            ended = true;
+        }
+    }
+}
+
+size_t CS230::Animation::CurrentFrame()
+{
+    return current_frame->Frame();
+}
+
+void CS230::Animation::Reset()
+{
+    current_command = 0;
+    ended           = false;
+    current_frame   = static_cast<PlayFrame*>(commands[current_command]);
+    current_frame->ResetTime();
+}
+
+bool CS230::Animation::Ended()
+{
+    return ended;
+}
+
+CS230::Animation::PlayFrame::PlayFrame(size_t _frame, double duration) : frame(_frame), target_time(duration), timer(0.0)
+{
+}
+
+void CS230::Animation::PlayFrame::Update(double dt)
+{
+    timer += dt;
+}
+
+bool CS230::Animation::PlayFrame::Ended()
+{
+    if (timer >= target_time)
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+void CS230::Animation::PlayFrame::ResetTime()
+{
+    timer = 0.0;
+}
+
+size_t CS230::Animation::PlayFrame::Frame()
+{
+    return frame;
+}
+
+CS230::Animation::Loop::Loop(size_t _loop_index) : loop_index(_loop_index)
+{
+}
+
+size_t CS230::Animation::Loop::LoopIndex()
+{
+    return loop_index;
+}
+
+
+
+================================================
+FILE: source/Engine/Animation.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Animation.h
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    April 16, 2025
+*/
+
+#pragma once
+#include <vector>
+#include <filesystem>
+#include "Engine.h"
+
+namespace CS230 {
+    class Animation {
+    public:
+        Animation();
+        Animation(const std::filesystem::path& animation_file);
+        ~Animation();
+
+        void Update(double dt);
+        size_t CurrentFrame();
+        void Reset();
+        bool Ended();
+    private:
+        enum class CommandType {
+            PlayFrame,
+            Loop,
+            End,
+        };
+        class Command {
+        public:
+            virtual ~Command() {}
+            virtual CommandType Type() = 0;
+        };
+
+
+        class End : public Command {
+        public:
+            virtual CommandType Type() override { return CommandType::End; }
+        private:
+        };
+
+
+        class Loop : public Command {
+        public:
+            Loop(size_t loop_index);
+            virtual CommandType Type() override { return CommandType::Loop; }
+            size_t LoopIndex();
+        private:
+            size_t loop_index;
+        };
+
+        class PlayFrame : public Command {
+        public:
+            PlayFrame(size_t frame, double duration);
+            virtual CommandType Type() override { return CommandType::PlayFrame; }
+            void Update(double dt);
+            bool Ended();
+            void ResetTime();
+            size_t Frame();
+        private:
+            size_t frame;
+            double target_time;
+            double timer;
+        };
+
+        size_t current_command;
+        std::vector<Command*> commands;
+        bool ended;
+        PlayFrame* current_frame;
+    };
+}
+
+
+
+
+================================================
+FILE: source/Engine/Camera.cpp
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Camera.cpp
+Project:    CS230 Engine
+Author:     Jonathan Holmes
+Created:    March 8, 2023
+*/
+#include "Camera.h"
+#include "Engine.h"
+#include "Matrix.h"
+
+namespace
+{
+  template <typename T, typename FLOAT = double>
+  void ease_to_target(T& current, const T& target, FLOAT delta_time, FLOAT weight = 1.0)
+  {
+	const auto easing = std::min(delta_time * weight, static_cast<FLOAT>(1.0));
+	current += easing * (target - current);
+  }
+} // namespace
+
+CS230::Camera::Camera(Math::rect _player_zone, size_t camera_amount)
+{
+  cameras.resize(camera_amount);
+  for (CameraSettings& cam : cameras)
+  {
+	cam.player_zone = _player_zone;
+	cam.position	= Math::vec2{ 0.0, 0.0 };
+	cam.offset		= Math::vec2{ 0.0, 0.0 };
+	cam.rotation	= 0.0;
+	cam.scale		= Math::vec2{ 1.0, 1.0 };
+  }
+}
+
+bool& CS230::Camera::SetFirstPersonView(size_t camera_index)
+{
+  return cameras[camera_index].first_person_view;
+}
+
+bool& CS230::Camera::SetAnchoring(size_t camera_index)
+{
+  return cameras[camera_index].anchoring;
+}
+
+bool& CS230::Camera::SetSmoothing(size_t camera_index)
+{
+  return cameras[camera_index].enable_smoothing;
+}
+
+void CS230::Camera::SetPosition(Math::vec2 new_position, size_t camera_index)
+{
+  cameras[camera_index].position			 = new_position;
+  cameras[camera_index].is_position_outdated = true;
+}
+
+void CS230::Camera::SetRotation(double new_rotation, size_t camera_index)
+{
+  if (cameras[camera_index].first_person_view)
+  {
+	cameras[camera_index].rotation			   = new_rotation;
+	cameras[camera_index].is_rotation_outdated = true;
+  }
+}
+
+void CS230::Camera::SetScale(Math::vec2 new_scale, size_t camera_index)
+{
+  cameras[camera_index].scale			  = new_scale;
+  cameras[camera_index].is_scale_outdated = true;
+}
+
+void CS230::Camera::SetPositionOffset(Math::vec2 new_offset, size_t camera_index)
+{
+  cameras[camera_index].offset				 = new_offset;
+  cameras[camera_index].is_position_outdated = true;
+}
+
+const Math::vec2& CS230::Camera::GetPosition(size_t camera_index) const
+{
+  return cameras[camera_index].position;
+}
+
+void CS230::Camera::SetLimit(Math::irect new_limit, size_t camera_index)
+{
+  cameras[camera_index].limit = new_limit;
+}
+
+void CS230::Camera::Update(const Math::vec2& player_position, double dt, size_t camera_index)
+{
+  CameraSettings& cam = cameras[camera_index];
+
+  // 1. Target Position Calculation Step
+  //    Start based on current position, adjust target according to player zone
+  Math::vec2 targetPos = cam.position;
+
+  if (cam.anchoring)
+  {
+	targetPos = player_position;
+  }
+  else
+  {
+	// Player Zone Check: Adjust target position if player leaves the box
+	if (player_position.x > cam.player_zone.Right() + targetPos.x)
+	{
+	  targetPos.x = player_position.x - cam.player_zone.Right();
+	}
+	if (player_position.x - targetPos.x < cam.player_zone.Left())
+	{
+	  targetPos.x = player_position.x - cam.player_zone.Left();
+	}
+
+	if (player_position.y > cam.player_zone.Top() + targetPos.y)
+	{
+	  targetPos.y = player_position.y - cam.player_zone.Top();
+	}
+	if (player_position.y - targetPos.y < cam.player_zone.Bottom())
+	{
+	  targetPos.y = player_position.y - cam.player_zone.Bottom();
+	}
+  }
+
+  // World Limit Check: Ensure target position doesn't go out of map bounds
+  if (targetPos.x < cam.limit.Left())
+	targetPos.x = cam.limit.Left();
+  if (targetPos.x > cam.limit.Right())
+	targetPos.x = cam.limit.Right();
+  if (targetPos.y < cam.limit.Bottom())
+	targetPos.y = cam.limit.Bottom();
+  if (targetPos.y > cam.limit.Top())
+	targetPos.y = cam.limit.Top();
+
+
+  // 2. Final Application Step (Use SetPosition)
+  if (cam.enable_smoothing)
+  {
+	// Get current position
+	Math::vec2 nextPos = GetPosition(camera_index);
+
+	// Move nextPos slightly towards targetPos using interpolation function (Weight 5.0)
+	ease_to_target(nextPos, targetPos, dt, 5.0);
+
+	// Apply calculated position
+	SetPosition(nextPos, camera_index);
+  }
+  else
+  {
+	// If smoothing is off, move to target position immediately
+	// (Call only when values differ to reduce unnecessary operations)
+	if (cam.position.x != targetPos.x || cam.position.y != targetPos.y)
+	{
+	  SetPosition(targetPos, camera_index);
+	}
+  }
+}
+
+Math::TransformationMatrix CS230::Camera::GetMatrix(size_t camera_index)
+{
+  if (cameras[camera_index].first_person_view)
+  {
+	if (cameras[camera_index].is_position_outdated || cameras[camera_index].is_rotation_outdated || cameras[camera_index].is_scale_outdated)
+	{
+	  cameras[camera_index].camera_matrix =
+		Math::TranslationMatrix(cameras[camera_index].position - cameras[camera_index].offset) * Math::RotationMatrix(cameras[camera_index].rotation) * Math::ScaleMatrix(cameras[camera_index].scale);
+	  cameras[camera_index].view_matrix = cameras[camera_index].camera_matrix;
+	  std::swap(cameras[camera_index].view_matrix[0][1], cameras[camera_index].view_matrix[1][0]);
+	  cameras[camera_index].view_matrix[0][2] =
+		-(cameras[camera_index].camera_matrix[0][0] * cameras[camera_index].camera_matrix[0][2] + cameras[camera_index].camera_matrix[1][0] * cameras[camera_index].camera_matrix[1][2]);
+	  cameras[camera_index].view_matrix[1][2] =
+		-(cameras[camera_index].camera_matrix[0][1] * cameras[camera_index].camera_matrix[0][2] + cameras[camera_index].camera_matrix[1][1] * cameras[camera_index].camera_matrix[1][2]);
+	  cameras[camera_index].is_position_outdated = false;
+	  cameras[camera_index].is_rotation_outdated = false;
+	  cameras[camera_index].is_scale_outdated	 = false;
+	}
+  }
+  else
+  {
+	if (cameras[camera_index].is_position_outdated || cameras[camera_index].is_scale_outdated)
+	{
+	  cameras[camera_index].camera_matrix =
+		Math::TranslationMatrix(cameras[camera_index].position - cameras[camera_index].offset) * Math::ScaleMatrix(cameras[camera_index].scale);
+	  cameras[camera_index].view_matrix = cameras[camera_index].camera_matrix;
+	  std::swap(cameras[camera_index].view_matrix[0][1], cameras[camera_index].view_matrix[1][0]);
+	  cameras[camera_index].view_matrix[0][2] =
+		-(cameras[camera_index].camera_matrix[0][0] * cameras[camera_index].camera_matrix[0][2] + cameras[camera_index].camera_matrix[1][0] * cameras[camera_index].camera_matrix[1][2]);
+	  cameras[camera_index].view_matrix[1][2] =
+		-(cameras[camera_index].camera_matrix[0][1] * cameras[camera_index].camera_matrix[0][2] + cameras[camera_index].camera_matrix[1][1] * cameras[camera_index].camera_matrix[1][2]);
+	  cameras[camera_index].is_position_outdated = false;
+	  cameras[camera_index].is_scale_outdated	 = false;
+	}
+	// if(cameras[camera_index].is_position_outdated){
+	//     cameras[camera_index].camera_matrix = Math::TranslationMatrix(cameras[camera_index].position - cameras[camera_index].offset) ;
+	//     cameras[camera_index].view_matrix = cameras[camera_index].camera_matrix;
+	//     cameras[camera_index].view_matrix[0][2] = -(cameras[camera_index].camera_matrix[0][0] * cameras[camera_index].camera_matrix[0][2] + cameras[camera_index].camera_matrix[1][0] *
+	//     cameras[camera_index].camera_matrix[1][2]); cameras[camera_index].view_matrix[1][2] = -(cameras[camera_index].camera_matrix[0][1] * cameras[camera_index].camera_matrix[0][2] +
+	//     cameras[camera_index].camera_matrix[1][1] * cameras[camera_index].camera_matrix[1][2]); cameras[camera_index].is_position_outdated = false;
+	// }
+  }
+  return cameras[camera_index].view_matrix;
+}
+
+
+
+================================================
+FILE: source/Engine/Camera.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Camera.h
+Project:    CS230 Engine
+Author:     Jonathan Holmes
+Created:    March 8, 2023
+*/
+
+#pragma once
+
+#include "Component.h"
+#include "Matrix.h"
+#include "Rect.h"
+#include "Vec2.h"
+#include <vector>
+namespace CS230
+{
+	class Camera : public Component
+	{
+	public:
+		Camera(Math::rect player_zone, size_t camera_amount = 1);
+		bool&			  SetFirstPersonView(size_t camera_index = 0);
+		bool&			  SetAnchoring(size_t camera_index = 0);
+		bool&             SetSmoothing(size_t camera_index = 0);
+		void			  SetPosition(Math::vec2 new_position, size_t camera_index = 0);
+		void			  SetRotation(double new_rotation, size_t camera_index = 0);
+		void			  SetScale(Math::vec2 new_scale, size_t camera_index = 0);
+		void			  SetPositionOffset(Math::vec2 new_offset, size_t camera_index = 0);
+		const Math::vec2& GetPosition(size_t camera_index = 0) const;
+		void			  SetLimit(Math::irect new_limit, size_t camera_index = 0);
+		using Component::Update; // say i'll use this version too, so don't hide anymore
+		void			  Update(const Math::vec2& player_position, double dt, size_t camera_index = 0);
+		Math::TransformationMatrix GetMatrix(size_t camera_index = 0);
+
+	private:
+		struct CameraSettings
+		{
+			Math::irect				   limit;
+			bool					   first_person_view{ true };
+			bool					   anchoring{ true };
+			bool                       enable_smoothing{ true };
+			Math::vec2				   position;
+			Math::vec2				   offset;
+			bool					   is_position_outdated{ true };
+			double					   rotation;
+			bool					   is_rotation_outdated{ true };
+			Math::vec2				   scale;
+			bool					   is_scale_outdated{ true };
+			Math::rect				   player_zone;
+			Math::TransformationMatrix camera_matrix{};
+			Math::TransformationMatrix view_matrix{};
+		} ;
+		std::vector<CameraSettings> cameras;
+	};
+}
+
+
+
+================================================
+FILE: source/Engine/Collision.cpp
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Component.cpp
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    May 17, 2025
+*/
+
+#include "Collision.h"
+#include "../CS200/IRenderer2D.h"
+#include "../CS200/RGBA.h"
+#include "Engine.h"
+#include "Logger.h"
+#include "TextureManager.h"
+
+namespace CS230
+{
+    RectCollision::RectCollision(Math::irect _boundary, CS230::GameObject* _object) : boundary(_boundary), object(_object)
+    {
+    }
+
+    void RectCollision::Draw(Math::TransformationMatrix display_matrix, float depth)
+    {
+        /*const double render_height = rlGetFramebufferHeight();
+
+        bottom_left.y = bottom_left.y * -1 + render_height;
+        bottom_right.y = bottom_right.y * -1 + render_height;
+        top_left.y = top_left.y * -1 + render_height;
+        top_right.y = top_right.y * -1 + render_height;
+
+
+        DrawLine(int(top_left.x), int(top_left.y), int(top_right.x), int(top_right.y), WHITE);
+        DrawLine(int(bottom_right.x), int(bottom_right.y), int(top_right.x), int(top_right.y), WHITE);
+        DrawLine(int(bottom_right.x), int(bottom_right.y), int(bottom_left.x), int(bottom_left.y), WHITE);
+        DrawLine(int(top_left.x), int(top_left.y), int(bottom_left.x), int(bottom_left.y), WHITE);*/
+		auto& texture_manager = Engine::GetTextureManager();
+		//texture_manager.SwitchRenderer(CS230::TextureManager::RendererType::Immediate);
+        Math::rect world_boundary = WorldBoundary();
+		auto	   renderer2d	  = texture_manager.GetRenderer2D();
+
+        // [[maybe_unused]] Math::vec2 bottom_left  = /*display_matrix * */ Math::vec2{ world_boundary.Left(), world_boundary.Bottom() };
+        // [[maybe_unused]] Math::vec2 bottom_right = /*display_matrix * */ Math::vec2{ world_boundary.Right(), world_boundary.Bottom() };
+        // [[maybe_unused]] Math::vec2 top_left     = /*display_matrix * */ Math::vec2{ world_boundary.Left(), world_boundary.Top() };
+        // [[maybe_unused]] Math::vec2 top_right    = /*display_matrix * */ Math::vec2{ world_boundary.Right(), world_boundary.Top() };
+
+        // const auto center_matrix = display_matrix * Math::TranslationMatrix(world_boundary.Center());
+
+        renderer2d->DrawRectangle(display_matrix*Math::TranslationMatrix(world_boundary.Center())*Math::ScaleMatrix(world_boundary.Size()), CS200::CLEAR, CS200::BLACK, line_width,depth);
+    }
+
+    Math::rect RectCollision::WorldBoundary()
+    {
+        return { object->GetMatrix() * static_cast<Math::vec2>(boundary.point_1), object->GetMatrix() * static_cast<Math::vec2>(boundary.point_2) };
+    }
+
+    bool RectCollision::IsCollidingWith(GameObject* other_object)
+    {
+        Collision* other_collider = other_object->GetGOComponent<Collision>();
+
+
+        if (other_collider == nullptr)
+        {
+            // Engine::GetLogger().LogError("No collision component found");
+            return false;
+        }
+
+
+        if (other_collider->Shape() != CollisionShape::Rect)
+        {
+            Engine::GetLogger().LogError("Rect vs unsupported type");
+            return false;
+        }
+
+        Math::rect rectangle_1 = WorldBoundary();
+        Math::rect rectangle_2 = dynamic_cast<RectCollision*>(other_collider)->WorldBoundary();
+
+        if (!((rectangle_1.Right() <= rectangle_2.Left()) || (rectangle_1.Left() >= rectangle_2.Right()) || (rectangle_1.Top() <= rectangle_2.Bottom()) || (rectangle_1.Bottom() >= rectangle_2.Top())))
+        {
+            return true;
+        }
+        return false;
+    }
+
+    bool RectCollision::IsCollidingWith(Math::vec2 point)
+    {
+        Math::rect rectangle = WorldBoundary();
+        if (!((rectangle.Left() > point.x) || (rectangle.Right() < point.x) || (rectangle.Top() < point.y) || (rectangle.Bottom() > point.y)))
+        {
+            return true;
+        }
+        return false;
+    }
+
+    CircleCollision::CircleCollision(double _radius, GameObject* _object) :  object(_object), radius(_radius)
+    {
+    }
+
+    void CircleCollision::Draw(Math::TransformationMatrix display_matrix,float depth)
+    {
+        // const double render_height = rlGetFramebufferHeight();
+        // Math::vec2 transformed_position = display_matrix * object->GetPosition();
+        // transformed_position.y = transformed_position.y * -1 + render_height;
+        // const int num_segments = 36;
+        // Math::vec2 previous_vertex;
+        // for (int i = 0; i <= num_segments + 1; i++) {
+        //     double theta = 2.0 * PI * static_cast<double>(i) / static_cast<double>(num_segments);
+        //     Math::vec2 vertex = {
+        //         transformed_position.x + GetRadius() * std::cos(theta),
+        //         transformed_position.y + GetRadius() * std::sin(theta)
+        //     };
+        //     if (i > 0) {
+        //         DrawLine(int(vertex.x), int(vertex.y), int(previous_vertex.x), int(previous_vertex.y), WHITE);
+        //     }
+        //     previous_vertex = vertex;
+        // }
+		auto& texture_manager = Engine::GetTextureManager();
+		//texture_manager.SwitchRenderer(CS230::TextureManager::RendererType::Immediate);
+        const auto transform = display_matrix * Math::TranslationMatrix(object->GetPosition()) * Math::ScaleMatrix(2 * GetRadius());
+		auto	   renderer2d = texture_manager.GetRenderer2D();
+		renderer2d->DrawCircle(transform, CS200::CLEAR, CS200::BLACK, line_width, depth);
+    }
+
+    double CircleCollision::GetRadius()
+    {
+        return std::min(object->GetScale().x, object->GetScale().x) * radius;
+    }
+
+    bool CircleCollision::IsCollidingWith(GameObject* other_object)
+    {
+        Collision* other_collider = other_object->GetGOComponent<Collision>();
+
+
+        if (other_collider == nullptr)
+        {
+            // Engine::GetLogger().LogError("No collision component found");
+            return false;
+        }
+
+
+        if (other_collider->Shape() != CollisionShape::Circle)
+        {
+            Engine::GetLogger().LogError("Circle vs unsupported type");
+            return false;
+        }
+        double     _radius        = GetRadius();
+        Math::vec2 position       = object->GetPosition();
+        double     other_radius   = dynamic_cast<CircleCollision*>(other_collider)->GetRadius();
+        Math::vec2 other_position = other_object->GetPosition();
+
+        if (((position.x - other_position.x) * (position.x - other_position.x) + (position.y - other_position.y) * (position.y - other_position.y)) <
+            ((_radius + other_radius) * (_radius + other_radius)))
+        {
+            return true;
+        }
+        return false;
+    }
+
+    bool CircleCollision::IsCollidingWith(Math::vec2 point)
+    {
+        double     _radius  = GetRadius();
+        Math::vec2 position = object->GetPosition();
+
+        if (((position.x - point.x) * (position.x - point.x) + (position.y - point.y) * (position.y - point.y)) < (_radius * _radius))
+        {
+            return true;
+        }
+        return false;
+    }
+}
+
+
+
+================================================
+FILE: source/Engine/Collision.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Collision.h
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    May 18, 2025
+*/
+#pragma once
+#include "Component.h"
+#include "Rect.h"
+#include "GameObject.h"
+#include "Matrix.h"
+
+namespace Math {
+    class TransformationMatrix;
+}
+
+namespace CS230 {
+    class GameObject;
+
+    class Collision : public Component {
+    public:
+        enum class CollisionShape {
+            Rect,
+            Circle
+        };
+        virtual CollisionShape Shape() = 0;
+        virtual void Draw(Math::TransformationMatrix display_matrix,float depth = 0.f) = 0;
+        virtual bool IsCollidingWith(GameObject* other_object) = 0;
+        virtual bool IsCollidingWith(Math::vec2 point) = 0;
+    };
+
+    class RectCollision : public Collision {
+    public:
+        RectCollision(Math::irect _boundary, GameObject* _object);
+        CollisionShape Shape() override {
+            return CollisionShape::Rect;
+        }
+        void Draw(Math::TransformationMatrix display_matrix, float depth) override;
+        Math::rect WorldBoundary();
+        bool IsCollidingWith(GameObject* other_object) override;
+        bool IsCollidingWith(Math::vec2 point) override;
+    private:
+        Math::irect boundary;
+        GameObject* object;
+        
+        static constexpr double line_width = 2.0;
+    };
+
+    class CircleCollision : public Collision {
+    public:
+        CircleCollision(double radius, GameObject* object);
+        CollisionShape Shape() override {
+            return CollisionShape::Circle;
+        }
+
+        void Draw(Math::TransformationMatrix display_matrix,float depth) override;
+        double GetRadius();
+        bool IsCollidingWith(GameObject* other_object) override;
+        bool IsCollidingWith(Math::vec2 point) override;
+    private:
+        GameObject* object;
+        double radius;
+        static constexpr double line_width = 5.0;
+    };
+
+}
+
+
+
+
+================================================
+FILE: source/Engine/Component.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Component.h
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    May 17, 2025
+*/
+#pragma once
+
+namespace CS230 {
+    class Component {
+    public:
+        virtual ~Component() {};
+        virtual void Update([[maybe_unused]] double dt) {};
+    };
+}
+
+
+
+
+================================================
+FILE: source/Engine/ComponentManager.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  ComponentManager.h
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    May 17, 2025
+*/
+#pragma once
+#include <algorithm>
+#include <vector>
+#include <stdexcept>
+
+#include "Component.h"
+
+namespace CS230
+{
+    class ComponentManager
+    {
+    public:
+        ~ComponentManager()
+        {
+            Clear();
+        }
+
+        void UpdateAll(double dt)
+        {
+            for (Component* component : components)
+            {
+                component->Update(dt);
+            }
+        }
+
+        void AddComponent(Component* component)
+        {
+            components.push_back(component);
+        }
+
+        template <typename T>
+        T* GetComponent()
+        {
+            for (Component* component : components)
+            {
+                T* ptr = dynamic_cast<T*>(component);
+                if (ptr != nullptr)
+                {
+                    return ptr;
+                }
+            }
+            return nullptr;
+        }
+
+        template <typename T>
+        void RemoveComponent()
+        {
+            auto it = std::find_if(components.begin(), components.end(), [](Component* element) { return (dynamic_cast<T*>(element) != nullptr); });
+            delete *it;
+            components.erase(it);
+        }
+
+        void Clear()
+        {
+            for (Component* component : components)
+            {
+                delete component;
+            }
+            components.clear();
+        }
+
+    private:
+        std::vector<Component*> components;
+    };
+}
+
+
+
+================================================
+FILE: source/Engine/Engine.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#include "Engine.h"
+#include "CS200/ImGuiHelper.h"
+#include "CS200/ImmediateRenderer2D.h"
+#include "CS200/NDC.h"
+#include "CS200/RenderingAPI.h"
+#include "FPS.h"
+#include "Font.h"
+#include "GameState.h"
+#include "GameStateManager.h"
+#include "Input.h"
+#include "Logger.h"
+#include "TextManager.h"
+#include "TextureManager.h"
+#include "Timer.h"
+#include "Window.h"
+
+#include <chrono>
+
+// Pimpl implementation class
+class Engine::Impl
+{
+public:
+	Impl()
+		:
+#ifdef DEVELOPER_VERSION
+		  logger(CS230::Logger::Severity::Debug, true, std::chrono::system_clock::now())
+#else
+		  logger(CS230::Logger::Severity::Debug, true, std::chrono::system_clock::now())
+#endif
+		  ,
+		  window{}, input{}
+	{
+	}
+
+	CS230::Logger			logger;
+	CS230::Window			window{};
+	CS230::Input			input{};
+	ImGuiHelper::Viewport	viewport{};
+	util::FPS				fps{};
+	util::Timer				timer{};
+	WindowEnvironment		environment{};
+	CS230::GameStateManager gameStateManager{};
+	// CS200::IRenderer2D*		renderer2D = nullptr;
+	CS230::TextureManager	textureManager{};
+	TextManager				textManager{};
+};
+
+Engine& Engine::Instance()
+{
+	static Engine instance;
+	return instance;
+}
+
+CS230::Logger& Engine::GetLogger()
+{
+	return Instance().impl->logger;
+}
+
+CS230::Window& Engine::GetWindow()
+{
+	return Instance().impl->window;
+}
+
+CS230::Input& Engine::GetInput()
+{
+	return Instance().impl->input;
+}
+
+const WindowEnvironment& Engine::GetWindowEnvironment()
+{
+	return Instance().impl->environment;
+}
+
+CS230::GameStateManager& Engine::GetGameStateManager()
+{
+	return Instance().impl->gameStateManager;
+}
+
+// CS200::IRenderer2D& Engine::GetRenderer2D()
+// {
+// 	return Instance().impl->renderer2D;
+// }
+
+CS230::TextureManager& Engine::GetTextureManager()
+{
+	return Instance().impl->textureManager;
+}
+
+TextManager& Engine::GetTextManager()
+{
+	return Instance().impl->textManager;
+}
+
+void Engine::Start(std::string_view window_title)
+{
+	impl->logger.LogEvent("Engine Started");
+#if defined(DEVELOPER_VERSION)
+	impl->logger.LogEvent("Developer Build");
+#endif
+	impl->window.Start(window_title);
+	auto& window = impl->window;
+
+	const auto window_size = window.GetSize();
+	impl->viewport		   = { 0, 0, window_size.x, window_size.y };
+	CS200::RenderingAPI::SetViewport(window_size);
+	impl->environment.DisplaySize = { static_cast<double>(window_size.x), static_cast<double>(window_size.y) };
+	ImGuiHelper::Initialize(window.GetSDLWindow(), window.GetGLContext());
+	window.SetEventCallback(ImGuiHelper::FeedEvent);
+    impl->textureManager.Init();
+	// impl->renderer2D.Init();
+	impl->timer.ResetTimeStamp();
+	impl->textManager.Init();
+}
+
+void Engine::Stop()
+{
+    impl->textureManager.Shutdown();
+	// impl->renderer2D.Shutdown();
+	impl->gameStateManager.Clear();
+	ImGuiHelper::Shutdown();
+	impl->logger.LogEvent("Engine Stopped");
+}
+
+void Engine::Update()
+{
+	updateEnvironment();
+
+	// service update
+	auto& environment = impl->environment;
+	impl->window.Update();
+	impl->input.Update();
+
+	auto& state_manager = impl->gameStateManager;
+	state_manager.Update(environment.DeltaTime);
+	const auto		  viewport		= impl->viewport;
+	const Math::ivec2 viewport_size = { viewport.width, viewport.height };
+	CS200::RenderingAPI::SetViewport(viewport_size, { viewport.x, viewport.y });
+	state_manager.Draw();
+	impl->viewport = ImGuiHelper::Begin();
+	state_manager.DrawImGui();
+	ImGuiHelper::End();
+}
+
+bool Engine::HasGameEnded()
+{
+	return impl->window.IsClosed() || impl->gameStateManager.HasGameEnded();
+}
+
+Engine::Engine() : impl(new Impl())
+{
+}
+
+Engine::~Engine()
+{
+	delete impl;
+}
+
+void Engine::updateEnvironment()
+{
+	auto& environment	  = impl->environment;
+	environment.DeltaTime = impl->timer.GetElapsedSeconds();
+	impl->timer.ResetTimeStamp();
+	environment.ElapsedTime += environment.DeltaTime;
+	++environment.FrameCount;
+	impl->fps.Update(environment.DeltaTime);
+	environment.FPS				  = impl->fps;
+	const auto viewport			  = impl->viewport;
+	impl->environment.DisplaySize = { static_cast<double>(viewport.width), static_cast<double>(viewport.height) };
+}
+
+
+

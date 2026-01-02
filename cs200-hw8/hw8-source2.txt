@@ -1,0 +1,1819 @@
+================================================
+FILE: source/CS200/InstancedRenderer2D.cpp
+================================================
+/**
+ * \file
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#include "InstancedRenderer2D.h"
+
+#include "Engine/Path.h"
+
+#include "OpenGL/Buffer.h"
+#include "OpenGL/GL.h"
+#include "OpenGL/VertexArray.h"
+#include "Renderer2DUtils.h"
+
+#include <fstream>
+#include <numeric>
+#include <sstream>
+
+namespace CS200
+
+{
+
+	InstancedRenderer2D::InstancedRenderer2D([[maybe_unused]] unsigned max_sprites)
+	{
+		maxInstances	= max_sprites;
+		maxSDFInstances = max_sprites;
+		instanceData.reserve(maxInstances);
+		sdfInstanceData.reserve(maxSDFInstances);
+	}
+
+	InstancedRenderer2D::InstancedRenderer2D(InstancedRenderer2D&& other) noexcept
+		: instanceData(std::move(other.instanceData)),
+          texturingCombineShader(std::move(other.texturingCombineShader)),
+          fixedVertexBufferHandle(other.fixedVertexBufferHandle),
+          instanceBufferHandle(other.instanceBufferHandle),
+          modelHandle(other.modelHandle),
+          sdfFixedVertexBufferHandle(other.sdfFixedVertexBufferHandle),
+          sdfInstanceBufferHandle(other.sdfInstanceBufferHandle),
+          sdfInstanceData(std::move(other.sdfInstanceData)),
+          sdfShader(std::move(other.sdfShader)),
+          sdfModelHandle(other.sdfModelHandle),
+          maxSDFInstances(other.maxSDFInstances),
+          indexBufferHandle(other.indexBufferHandle),
+          camera_uniform_buffer(other.camera_uniform_buffer),
+          camera_array(other.camera_array),
+          currentCameraMatrix(other.currentCameraMatrix),
+          maxInstances(other.maxInstances),
+          textureSlots(std::move(other.textureSlots)),
+          activeTextureSize(other.activeTextureSize),
+          draw_call(other.draw_call),
+          texture_call(other.texture_call)
+	{
+		other.fixedVertexBufferHandle	 = 0;
+		other.instanceBufferHandle		 = 0;
+		other.modelHandle				 = 0;
+		other.sdfFixedVertexBufferHandle = 0;
+		other.sdfInstanceBufferHandle	 = 0;
+		other.sdfModelHandle			 = 0;
+		other.indexBufferHandle			 = 0;
+		other.camera_uniform_buffer		 = 0;
+
+		other.texturingCombineShader = {};
+		other.sdfShader				 = {};
+
+		other.maxInstances		= 0;
+		other.maxSDFInstances	= 0;
+		other.activeTextureSize = 0;
+		other.draw_call			= 0;
+		other.texture_call		= 0;
+	}
+
+	InstancedRenderer2D& InstancedRenderer2D::operator=(InstancedRenderer2D&& other) noexcept
+	{
+		std::swap(instanceData, other.instanceData);
+		std::swap(texturingCombineShader, other.texturingCombineShader);
+		std::swap(fixedVertexBufferHandle, other.fixedVertexBufferHandle);
+		std::swap(instanceBufferHandle, other.instanceBufferHandle);
+		std::swap(modelHandle, other.modelHandle);
+
+		std::swap(sdfInstanceData, other.sdfInstanceData);
+		std::swap(sdfFixedVertexBufferHandle, other.sdfFixedVertexBufferHandle);
+		std::swap(sdfInstanceBufferHandle, other.sdfInstanceBufferHandle);
+		std::swap(sdfShader, other.sdfShader);
+		std::swap(sdfModelHandle, other.sdfModelHandle);
+		std::swap(maxSDFInstances, other.maxSDFInstances);
+
+		std::swap(indexBufferHandle, other.indexBufferHandle);
+		std::swap(camera_uniform_buffer, other.camera_uniform_buffer);
+		std::swap(camera_array, other.camera_array);
+		std::swap(currentCameraMatrix, other.currentCameraMatrix);
+		std::swap(maxInstances, other.maxInstances);
+		std::swap(textureSlots, other.textureSlots);
+		std::swap(activeTextureSize, other.activeTextureSize);
+		std::swap(draw_call, other.draw_call);
+		std::swap(texture_call, other.texture_call);
+
+		return *this;
+	}
+
+	InstancedRenderer2D::~InstancedRenderer2D()
+	{
+		Shutdown();
+	}
+
+	void InstancedRenderer2D::Init()
+
+	{
+		// get max texture units
+		// get glsl code and update the fragment shader
+		// create the shader
+		// set th binding values for textures array
+
+		// get how many texture opengl can draw
+		GLint max_tex_units = 0;
+		GL::GetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &max_tex_units); // check with docs.gl to get minimum(16) and maximum
+		textureSlots.resize(static_cast<size_t>(std::min(max_tex_units, 64)));
+
+
+		// load shaders with parsing
+		const std::filesystem::path vertex_file = assets::locate_asset("Assets/shaders/InstancedRenderer2D/quad.vert");
+		std::ifstream				vert_stream(vertex_file);
+		std::stringstream			vert_text_stream;
+		vert_text_stream << vert_stream.rdbuf();
+		const std::string vertex_glsl = vert_text_stream.str();
+
+		const std::filesystem::path fragment_file = assets::locate_asset("Assets/shaders/InstancedRenderer2D/quad.frag");
+		std::ifstream				frag_stream(fragment_file);
+		std::stringstream			frag_text_stream;
+		frag_text_stream << frag_stream.rdbuf();
+		std::string frag_glsl = frag_text_stream.str();
+
+		const size_t	  first_newline = frag_glsl.find('\n');
+		const std::string define_line	= "\n#define MAX_TEXTURE_SLOTS " + std::to_string(textureSlots.size());
+		frag_glsl.insert(first_newline, define_line);
+
+		texturingCombineShader = OpenGL::CreateShader(std::string_view{ vertex_glsl }, std::string_view{ frag_glsl });
+
+		// have to set their binding index
+		GL::UseProgram(texturingCombineShader.Shader);
+
+		std::vector<int> sampler_binding_values(textureSlots.size());
+		std::iota(sampler_binding_values.begin(), sampler_binding_values.end(), 0);
+		const GLint location = GL::GetUniformLocation(texturingCombineShader.Shader, "uTextures");
+		GL::Uniform1iv(location, static_cast<GLsizei>(textureSlots.size()), sampler_binding_values.data());
+
+		GL::UseProgram(0);
+
+		// create our fixed buffer data
+		// create index buffer data
+		// create our instanced buffer
+		// create VAO
+
+		constexpr float fixed_sprite_vertices[][4] = {
+			// bottom left
+			{ -0.5f, -0.5f, 0.0f, 0.0f },
+			// bottom right
+			{  0.5f, -0.5f, 1.0f, 0.0f },
+			// top right
+			{  0.5f,	0.5f, 1.0f, 1.0f },
+			// top left
+			{ -0.5f,	 0.5f, 0.0f, 1.0f }
+		};
+
+		constexpr unsigned char indicies[] = { 0, 1, 2, 0, 2, 3 };
+
+		fixedVertexBufferHandle = OpenGL::CreateBuffer(OpenGL::BufferType::Vertices, std::as_bytes(std::span{ fixed_sprite_vertices }));
+		indexBufferHandle		= OpenGL::CreateBuffer(OpenGL::BufferType::Indices, std::as_bytes(std::span{ indicies }));
+		instanceBufferHandle	= OpenGL::CreateBuffer(OpenGL::BufferType::Vertices, static_cast<GLsizeiptr>(sizeof(QuadInstance) * maxInstances));
+
+		auto fixedbuffer_and_instancebuffer = {
+			OpenGL::VertexBuffer{ fixedVertexBufferHandle,{ OpenGL::Attribute::Float2, OpenGL::Attribute::Float2 }					},
+			OpenGL::VertexBuffer{	  instanceBufferHandle,
+								  { OpenGL::Attribute::Float3.WithDivisor(1), OpenGL::Attribute::Float3.WithDivisor(1), OpenGL::Attribute::UByte4ToNormalized.WithDivisor(1),
+									OpenGL::Attribute::Float2.WithDivisor(1), OpenGL::Attribute::Float2.WithDivisor(1), OpenGL::Attribute::Int.WithDivisor(1),
+									OpenGL::Attribute::Float.WithDivisor(1) } }
+		};
+
+		modelHandle = OpenGL::CreateVertexArrayObject(fixedbuffer_and_instancebuffer, indexBufferHandle);
+
+		// SDF
+		//  create vertex array object, buffer vertices, buffer indices
+		sdfShader = OpenGL::CreateShader(assets::locate_asset("Assets/shaders/InstancedRenderer2D/sdf.vert"), assets::locate_asset("Assets/shaders/InstancedRenderer2D/sdf.frag"));
+
+		constexpr float position_vertices[][2] = {
+			// bottom left
+			{ -0.5f, -0.5f },
+			// bottom right
+			{  0.5f, -0.5f },
+			// top right
+			{  0.5f,	0.5f },
+			// top left
+			{ -0.5f,	 0.5f }
+		};
+		sdfFixedVertexBufferHandle = OpenGL::CreateBuffer(OpenGL::BufferType::Vertices, std::as_bytes(std::span{ position_vertices }));
+		sdfInstanceBufferHandle	   = OpenGL::CreateBuffer(OpenGL::BufferType::Vertices, static_cast<GLsizeiptr>(sizeof(SDFInstance) * maxInstances));
+
+		const auto sdf_fix_instance = {
+			OpenGL::VertexBuffer{ sdfFixedVertexBufferHandle,{ OpenGL::Attribute::Float2 }	}, //  Layout 0: aModelPosition														},
+			OpenGL::VertexBuffer{	  sdfInstanceBufferHandle,
+								  {
+								  OpenGL::Attribute::Float3.WithDivisor(1),				// Layout 1: aModelRow0
+								  OpenGL::Attribute::Float3.WithDivisor(1),				// Layout 2: aModelRow1
+								  OpenGL::Attribute::UByte4ToNormalized.WithDivisor(1), // Layout 3: aFillColor
+								  OpenGL::Attribute::UByte4ToNormalized.WithDivisor(1), // Layout 4: aLineColor
+								  OpenGL::Attribute::Float2.WithDivisor(1),				// Layout 5: aWorldSize
+								  OpenGL::Attribute::Float.WithDivisor(1),				// Layout 6: aLineWidth
+								  OpenGL::Attribute::Int.WithDivisor(1),				// Layout 7: aShape (0=Circle, 1=Rect)
+								  OpenGL::Attribute::Float.WithDivisor(1),				// Layout 8: aDepth
+								  } }
+		};
+		sdfModelHandle = OpenGL::CreateVertexArrayObject(sdf_fix_instance, indexBufferHandle);
+
+		camera_uniform_buffer = OpenGL::CreateBuffer(OpenGL::BufferType::UniformBlocks, sizeof(camera_array));
+		OpenGL::BindUniformBufferToShader(texturingCombineShader.Shader, 0, camera_uniform_buffer, "NDC");
+		OpenGL::BindUniformBufferToShader(sdfShader.Shader, 0, camera_uniform_buffer, "NDC");
+	}
+
+	void InstancedRenderer2D::Shutdown()
+
+	{
+		OpenGL::DestroyShader(texturingCombineShader);
+		OpenGL::DestroyShader(sdfShader);
+
+		GL::DeleteBuffers(1, &fixedVertexBufferHandle), fixedVertexBufferHandle		  = 0;
+		GL::DeleteBuffers(1, &instanceBufferHandle), instanceBufferHandle			  = 0;
+		GL::DeleteBuffers(1, &sdfFixedVertexBufferHandle), sdfFixedVertexBufferHandle = 0;
+		GL::DeleteBuffers(1, &sdfInstanceBufferHandle), sdfInstanceBufferHandle		  = 0;
+		GL::DeleteBuffers(1, &indexBufferHandle), indexBufferHandle					  = 0;
+		GL::DeleteBuffers(1, &camera_uniform_buffer), camera_uniform_buffer			  = 0;
+
+		GL::DeleteVertexArrays(1, &modelHandle), modelHandle	   = 0;
+		GL::DeleteVertexArrays(1, &sdfModelHandle), sdfModelHandle = 0;
+
+		instanceData.clear();
+		sdfInstanceData.clear();
+		textureSlots.clear();
+
+		activeTextureSize = 0;
+		draw_call		  = 0;
+		texture_call	  = 0;
+	}
+
+	void InstancedRenderer2D::BeginScene(const Math::TransformationMatrix& view_projection)
+	{
+		//- Store matrix for potential later use
+		currentCameraMatrix = view_projection;
+
+		//- Convert 3x3 matrix to 4x3 format for uniform buffer
+		updateCameraUniformValues(currentCameraMatrix);
+
+
+		//- Update uniform buffer with new matrix data
+		OpenGL::UpdateBufferData(OpenGL::BufferType::UniformBlocks, camera_uniform_buffer, std::as_bytes(std::span{ camera_array }));
+
+		//- Bind uniform buffer for use by shaders
+		GL::BindBuffer(GL_UNIFORM_BUFFER, camera_uniform_buffer);
+
+		draw_call	 = 0;
+		texture_call = 0;
+		startBatch();
+	}
+
+	void InstancedRenderer2D::EndScene()
+	{
+		flush();
+	}
+
+	void InstancedRenderer2D::DrawQuad(
+		const Math::TransformationMatrix& transform, OpenGL::TextureHandle texture, Math::vec2 texture_coord_bl, Math::vec2 texture_coord_tr, CS200::RGBA tintColor, float depth)
+	{
+		if (instanceData.size() >= maxInstances)
+		{
+			flush();
+		}
+
+		if (sdfInstanceData.size() >= maxSDFInstances)
+		{
+			flush();
+		}
+		int tex_index = 0;
+		bool found = false;
+
+		for (size_t i = 0; i < activeTextureSize; ++i)
+		{
+			if (textureSlots[i] == texture)
+			{
+				found = true;
+				tex_index = static_cast<int>(i);
+			}
+		}
+
+
+		if (!found)
+		{
+			if (activeTextureSize >= textureSlots.size())
+			{
+				flush();
+			}
+			tex_index = static_cast<int>(activeTextureSize);
+			textureSlots[activeTextureSize] = texture;
+			++activeTextureSize;
+		}
+
+
+		const float left = static_cast<float>(texture_coord_bl.x);
+		const float bottom = static_cast<float>(texture_coord_bl.y);
+		const float right = static_cast<float>(texture_coord_tr.x);
+		const float top = static_cast<float>(texture_coord_tr.y);
+
+		QuadInstance instance;
+		instance.textureIndex = tex_index;
+		instance.texScale[0] = right - left;
+		instance.texScale[1] = top - bottom;
+		instance.texOffset[0] = left;
+		instance.texOffset[1] = bottom;
+		instance.transformrow0[0] = static_cast<float>(transform[0][0]);
+		instance.transformrow0[1] = static_cast<float>(transform[0][1]);
+		instance.transformrow0[2] = static_cast<float>(transform[0][2]);
+		instance.transformrow1[0] = static_cast<float>(transform[1][0]);
+		instance.transformrow1[1] = static_cast<float>(transform[1][1]);
+		instance.transformrow1[2] = static_cast<float>(transform[1][2]);
+		instance.tint = ColorArray(tintColor);
+		instance.depth			  = depth;
+
+		instanceData.push_back(instance);
+
+		++texture_call;
+	}
+
+	void InstancedRenderer2D::startBatch()
+
+	{
+		instanceData.clear();
+
+		activeTextureSize = 0;
+
+
+		sdfInstanceData.clear();
+	}
+
+	void InstancedRenderer2D::flush()
+	{
+		if (!instanceData.empty()) [[unlikely]]
+		{
+			GL::BindBuffer(GL_ARRAY_BUFFER, instanceBufferHandle);
+			GL::BufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(sizeof(QuadInstance) * maxInstances), nullptr, GL_DYNAMIC_DRAW);
+			OpenGL::UpdateBufferData(OpenGL::BufferType::Vertices, instanceBufferHandle, std::as_bytes(std::span{ instanceData.data(), instanceData.size() }));
+
+			// select our texture
+			for (size_t i = 0; i < activeTextureSize; ++i)
+			{
+				GL::ActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + i));
+				GL::BindTexture(GL_TEXTURE_2D, textureSlots[i]);
+			}
+			GL::UseProgram(texturingCombineShader.Shader);
+			GL::BindVertexArray(modelHandle);
+			GL::DrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, nullptr, static_cast<GLsizei>(instanceData.size()));
+			++draw_call;
+		}
+
+		if (!sdfInstanceData.empty())
+		{
+			GL::BindBuffer(GL_ARRAY_BUFFER, sdfInstanceBufferHandle);
+			GL::BufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(sizeof(SDFInstance) * maxSDFInstances), nullptr, GL_DYNAMIC_DRAW);
+
+			OpenGL::UpdateBufferData(OpenGL::BufferType::Vertices, sdfInstanceBufferHandle, std::as_bytes(std::span{ sdfInstanceData.data(), sdfInstanceData.size() }));
+
+			GL::UseProgram(sdfShader.Shader);
+			GL::BindVertexArray(sdfModelHandle);
+			GL::DrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, nullptr, static_cast<GLsizei>(sdfInstanceData.size()));
+			++draw_call;
+		}
+		GL::BindVertexArray(0);
+		GL::UseProgram(0);
+		GL::BindTexture(GL_TEXTURE_2D, 0);
+		GL::BindBuffer(GL_ARRAY_BUFFER, 0);
+
+		startBatch();
+	}
+
+	void InstancedRenderer2D::DrawCircle(
+		[[maybe_unused]] const Math::TransformationMatrix& transform, [[maybe_unused]] CS200::RGBA fill_color, [[maybe_unused]] CS200::RGBA line_color, [[maybe_unused]] double line_width, float depth)
+	{
+		if (instanceData.size() >= maxInstances)
+		{
+			flush();
+		}
+
+		if (sdfInstanceData.size() >= maxSDFInstances)
+		{
+			flush();
+		}
+
+		const auto sdf_transform = Renderer2DUtils::CalculateSDFTransform(transform, line_width);
+		const auto fill_bytes	 = ColorArray(fill_color);
+		const auto line_bytes	 = ColorArray(line_color);
+
+		SDFInstance sdf_instance;
+
+		sdf_instance.transformrow0[0] = sdf_transform.QuadTransform[0];
+		sdf_instance.transformrow0[1] = sdf_transform.QuadTransform[3];
+		sdf_instance.transformrow0[2] = sdf_transform.QuadTransform[6];
+
+		sdf_instance.transformrow1[0] = sdf_transform.QuadTransform[1];		
+		sdf_instance.transformrow1[1] = sdf_transform.QuadTransform[4];
+		sdf_instance.transformrow1[2] = sdf_transform.QuadTransform[7];
+
+		sdf_instance.fillColor	 = fill_bytes;
+		sdf_instance.lineColor	 = line_bytes;
+		sdf_instance.worldSize_x = static_cast<float>(sdf_transform.WorldSize[0]);
+		sdf_instance.worldSize_y = static_cast<float>(sdf_transform.WorldSize[1]);
+		sdf_instance.lineWidth	 = static_cast<float>(line_width);
+		sdf_instance.shape		 = static_cast<int>(SDFShape::Circle); // 0
+		sdf_instance.depth		 = depth;
+
+		sdfInstanceData.push_back(sdf_instance);
+
+		++texture_call;
+	}
+
+	void InstancedRenderer2D::DrawRectangle(
+		[[maybe_unused]] const Math::TransformationMatrix& transform, [[maybe_unused]] CS200::RGBA fill_color, [[maybe_unused]] CS200::RGBA line_color, [[maybe_unused]] double line_width, float depth)
+	{
+		if (instanceData.size() >= maxInstances)
+		{
+			flush();
+		}
+
+		if (sdfInstanceData.size() >= maxSDFInstances)
+		{
+			flush();
+		}
+
+		const auto sdf_transform = Renderer2DUtils::CalculateSDFTransform(transform, line_width);
+		const auto fill_bytes	 = ColorArray(fill_color);
+		const auto line_bytes	 = ColorArray(line_color);
+
+		SDFInstance sdf_instance;
+
+		sdf_instance.transformrow0[0] = sdf_transform.QuadTransform[0];
+		sdf_instance.transformrow0[1] = sdf_transform.QuadTransform[3];
+		sdf_instance.transformrow0[2] = sdf_transform.QuadTransform[6];
+
+		sdf_instance.transformrow1[0] = sdf_transform.QuadTransform[1];
+		sdf_instance.transformrow1[1] = sdf_transform.QuadTransform[4];
+		sdf_instance.transformrow1[2] = sdf_transform.QuadTransform[7];
+
+		sdf_instance.fillColor	 = fill_bytes;
+		sdf_instance.lineColor	 = line_bytes;
+		sdf_instance.worldSize_x = static_cast<float>(sdf_transform.WorldSize[0]);
+		sdf_instance.worldSize_y = static_cast<float>(sdf_transform.WorldSize[1]);
+		sdf_instance.lineWidth	 = static_cast<float>(line_width);
+		sdf_instance.shape		 = static_cast<int>(SDFShape::Rectangle); // 1
+		sdf_instance.depth		 = depth;
+
+		sdfInstanceData.push_back(sdf_instance);
+
+		++texture_call;
+	}
+
+	void InstancedRenderer2D::DrawLine(
+		[[maybe_unused]] const Math::TransformationMatrix& transform, [[maybe_unused]] Math::vec2 start_point, [[maybe_unused]] Math::vec2 end_point, [[maybe_unused]] CS200::RGBA line_color,
+		[[maybe_unused]] double line_width, float depth)
+	{
+		const auto line_transform = Renderer2DUtils::CalculateLineTransform(transform, start_point, end_point, line_width);
+		DrawRectangle(line_transform, line_color, line_color, line_width, depth);
+	}
+
+	void InstancedRenderer2D::DrawLine(
+		[[maybe_unused]] Math::vec2 start_point, [[maybe_unused]] Math::vec2 end_point, [[maybe_unused]] CS200::RGBA line_color, [[maybe_unused]] double line_width, float depth)
+	{
+		DrawLine(Math::TransformationMatrix{}, start_point, end_point, line_color, line_width, depth);
+	}
+
+	void InstancedRenderer2D::updateCameraUniformValues(const Math::TransformationMatrix& view_projection)
+	{
+		const auto as_3x3 = Renderer2DUtils::to_opengl_mat3(view_projection);
+		for (std::size_t col = 0; col < 3; ++col)
+		{
+			const std::size_t src_offset = col * 3;
+			const std::size_t dst_offset = col * 4;
+
+
+			camera_array[dst_offset + 0] = as_3x3[src_offset + 0]; // how?****
+			camera_array[dst_offset + 1] = as_3x3[src_offset + 1];
+			camera_array[dst_offset + 2] = as_3x3[src_offset + 2];
+			camera_array[dst_offset + 3] = 0.0f;
+		}
+	}
+
+	size_t InstancedRenderer2D::GetDrawCallCounter()
+	{
+		return draw_call;
+	}
+
+	size_t InstancedRenderer2D::GetDrawTextureCounter()
+	{
+		return texture_call;
+	}
+}
+
+
+================================================
+FILE: source/CS200/InstancedRenderer2D.h
+================================================
+/**
+ * \file
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+#pragma once
+
+#include "IRenderer2D.h"
+
+#include "Engine/Matrix.h"
+
+#include "OpenGL/Shader.h"
+#include "OpenGL/VertexArray.h"
+#include <array>
+#include <vector>
+
+/**
+ one model,
+ lots of instances
+ sharing buffer static -> positions(because we use single quad!!)
+and each instance has their own dynamic buffer
+
+ ->color
+ ->texture
+ ->model xform
+ ->texcoords xform
+ */
+
+
+namespace CS200
+{
+	class InstancedRenderer2D : public IRenderer2D
+	{
+	public:
+		InstancedRenderer2D(unsigned max_sprites = 10'000); // means max_instances
+		InstancedRenderer2D(const InstancedRenderer2D& other) = delete;
+		InstancedRenderer2D(InstancedRenderer2D&& other) noexcept;
+		InstancedRenderer2D& operator=(const InstancedRenderer2D& other) = delete;
+		InstancedRenderer2D& operator=(InstancedRenderer2D&& other) noexcept;
+		~InstancedRenderer2D() override;
+
+		void Init() override;
+		void Shutdown() override;
+		void BeginScene(const Math::TransformationMatrix& view_projection) override;
+		void EndScene() override;
+		void
+			DrawQuad(const Math::TransformationMatrix& transform, OpenGL::TextureHandle texture, Math::vec2 texture_coord_bl, Math::vec2 texture_coord_tr, CS200::RGBA tintColor, float depth) override;
+		// void DrawQuad(std::span<const float, 9> transform, OpenGL::Handle texture, std::span<const float, 4> texture_coords_lbrt, std::span<const float, 4> tint_color) override;
+
+		void DrawCircle(const Math::TransformationMatrix& transform, CS200::RGBA fill_color, CS200::RGBA line_color, double line_width, float depth) override;
+		void DrawRectangle(const Math::TransformationMatrix& transform, CS200::RGBA fill_color, CS200::RGBA line_color, double line_width, float depth) override;
+		void DrawLine(const Math::TransformationMatrix& transform, Math::vec2 start_point, Math::vec2 end_point, CS200::RGBA line_color, double line_width, float depth) override;
+		void DrawLine(Math::vec2 start_point, Math::vec2 end_point, CS200::RGBA line_color, double line_width, float depth) override;
+
+	private:
+		struct QuadInstance // maybe we can make more compact? bit width, ...
+		{
+			/*float x = 0, y = 0;*/							 // don't need for each instance anymore!!
+			float						 transformrow0[3]{}; // instead having vertex for each instance, we have transform mat for each instance!
+			float						 transformrow1[3]{};
+			std::array<unsigned char, 4> tint{};		// caution !!! to use createvao helper func, make order same as in shader's attrib!!!!!
+			/*float s = 0, t = 0;*/						// don't need for each instance anymore!!
+			float						 texScale[2]{}; // instead having texcoord for each instance, we have transform mat of texcoord for each instance with compacted version
+			float						 texOffset[2]{};
+			int							 textureIndex = 0;
+			float						 depth		  = 0.f;
+		};
+
+		std::vector<QuadInstance> instanceData{};
+		OpenGL::CompiledShader	  texturingCombineShader;
+		OpenGL::BufferHandle	  fixedVertexBufferHandle{};
+		OpenGL::BufferHandle	  instanceBufferHandle{};
+		OpenGL::VertexArrayHandle modelHandle{};
+
+		// sdf
+		struct SDFInstance
+		{
+			// float						 x = 0, y = 0;
+			float						 transformrow0[3]{};			   // Layout 1: aModelRow0
+			float						 transformrow1[3]{};			   // Layout 2: aModelRow1
+			std::array<unsigned char, 4> fillColor{};					   // Layout 3: aFillColor
+			std::array<unsigned char, 4> lineColor{};					   // Layout 4: aLineColor
+			float						 worldSize_x = 0, worldSize_y = 0; // Layout 5: aWorldSize
+			float						 lineWidth = 0;					   // Layout 6: aLineWidth
+			int							 shape	   = 0;					   // Layout 7: aShape (0=Circle, 1=Rect)
+			float						 depth	   = 0.f;					   // Layout 8: aDepth
+		};
+
+		OpenGL::BufferHandle	  sdfFixedVertexBufferHandle{};
+		OpenGL::BufferHandle	  sdfInstanceBufferHandle{};
+		std::vector<SDFInstance>  sdfInstanceData{};
+		OpenGL::CompiledShader	  sdfShader{};
+		OpenGL::VertexArrayHandle sdfModelHandle{};
+
+		unsigned maxSDFInstances = 0;
+
+		OpenGL::BufferHandle indexBufferHandle{};
+
+		enum class SDFShape : uint8_t
+		{
+			Circle	  = 0,
+			Rectangle = 1,
+		};
+
+
+		// ndc block
+
+		OpenGL::BufferHandle camera_uniform_buffer{};
+
+		std::array<float, 12> camera_array{};
+
+		Math::TransformationMatrix currentCameraMatrix{};
+
+
+		unsigned maxInstances = 0;
+
+
+		std::vector<OpenGL::TextureHandle> textureSlots;
+
+		size_t activeTextureSize = 0;
+
+
+	private:
+
+		void updateCameraUniformValues(const Math::TransformationMatrix& view_projection);
+
+		void flush(); // when quad amount is reached to max_quad
+
+		void startBatch();
+
+		size_t draw_call;
+		size_t GetDrawCallCounter() override;
+
+		size_t texture_call = 0;
+		size_t GetDrawTextureCounter() override;
+	};
+
+}
+
+
+
+================================================
+FILE: source/CS200/IRenderer2D.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+
+#include "Engine/Vec2.h"
+#include "OpenGL/Texture.h"
+#include "RGBA.h"
+
+namespace Math
+{
+    class TransformationMatrix;
+}
+
+namespace CS200
+{
+    class IRenderer2D
+    {
+    public:
+        
+        virtual ~IRenderer2D() = default;
+
+        virtual void Init() = 0;        
+        virtual void Shutdown() = 0;
+        virtual void BeginScene(const Math::TransformationMatrix& view_projection) = 0;
+        virtual void EndScene() = 0;
+
+        virtual void DrawQuad(
+            const Math::TransformationMatrix& transform, OpenGL::TextureHandle texture, Math::vec2 texture_coord_bl = Math::vec2{ 0.0, 0.0 }, Math::vec2 texture_coord_tr = Math::vec2{ 1.0, 1.0 },
+            CS200::RGBA tintColor = CS200::WHITE, float depth = 1.f) = 0;
+        virtual void
+			DrawCircle(const Math::TransformationMatrix& transform, CS200::RGBA fill_color = CS200::CLEAR, CS200::RGBA line_color = CS200::WHITE, double line_width = 2.0, float depth = 0.f) = 0;
+        virtual void
+			DrawRectangle(const Math::TransformationMatrix& transform, CS200::RGBA fill_color = CS200::CLEAR, CS200::RGBA line_color = CS200::WHITE, double line_width = 2.0, float depth = 0.f) = 0;
+        virtual void
+			DrawLine(const Math::TransformationMatrix& transform, Math::vec2 startPoint, Math::vec2 endPoint, CS200::RGBA line_color = CS200::WHITE, double line_width = 2.0, float depth = 0.f) = 0;
+        virtual void DrawLine(Math::vec2 start_point, Math::vec2 end_point, CS200::RGBA line_color = CS200::WHITE, double line_width = 2.0, float depth = 0.f) = 0;
+
+        virtual size_t GetDrawCallCounter() = 0;
+        virtual size_t GetDrawTextureCounter() = 0;
+    };
+
+}
+
+
+
+================================================
+FILE: source/CS200/NDC.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Taekyung ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+#include "Engine/Matrix.h"
+#include "Engine/Vec2.h"
+
+namespace CS200
+{
+    /**
+     * \brief Create a transformation matrix that converts screen coordinates to NDC
+     * \param view_size Width and height of the viewport/screen in pixels
+     * \return Transformation matrix for screen-to-NDC conversion
+     *
+     * \note The returned matrix transforms FROM screen coordinates TO NDC coordinates
+     * \note This is typically used once per frame in BeginScene()
+     * \note Screen coordinates assume (0,0) at bottom-left, (width,height) at top-right
+     *
+     * NDC (Normalized Device Coordinates) is a standard coordinate system used by graphics
+     * APIs where all visible coordinates range from -1 to +1 in both X and Y axes.
+     * This system is hardware-standard and allows graphics pipelines to work consistently
+     * across different screen resolutions and aspect ratios.
+     *
+     * Purpose and Benefits:
+     * - Provides resolution-independent coordinate system for rendering
+     * - Standardizes coordinate space for graphics hardware (GPUs expect NDC)
+     * - Enables consistent camera/viewport transformations
+     * - Simplifies clipping and culling operations in graphics pipeline
+     * - Makes shaders and rendering code portable across different screen sizes
+     *
+     * Coordinate System Mapping:
+     * \code
+     * We want to map (0, w) to (-1,1) and (0,h) to (-1,1)
+     *             (w,h)                  (1,1)
+     *      +--------+             +--------+
+     *      |        |             |        |
+     *      | cam    |     --->    | ndc    |
+     *      +--------+             +--------+
+     *    (0,0)                 (-1,-1)
+     * \endcode
+     *
+     * Mathematical Transformation:
+     * 1. Scale: Divide by half-dimensions to get 0-2 range
+     * 2. Translate: Subtract 1 to center around origin (-1 to +1)
+     * 3. Formula: ndc = (screen_coord / (dimension/2)) - 1
+     *
+     * Common Use Cases:
+     * - Camera/view matrix setup for 2D rendering
+     * - Converting mouse coordinates to world coordinates
+     * - Setting up orthographic projections
+     * - Viewport-independent UI positioning
+     * - Cross-platform graphics coordinate normalization
+     *
+     * Integration with Graphics Pipeline:
+     * Window Coordinates -> World Coordinates -> NDC -> GPU Rendering
+     */
+    inline Math::TransformationMatrix build_ndc_matrix(Math::ivec2 view_size, [[maybe_unused]] bool is_centered = false) noexcept
+    {
+        if(is_centered)
+        {
+            return Math::ScaleMatrix({ 2.0 / view_size.x, 2.0 / view_size.y });
+        }
+        return Math::TranslationMatrix(Math::vec2{ -1.0, -1.0 }) * Math::ScaleMatrix({ 2.0 / view_size.x, 2.0 / view_size.y });
+    }
+}
+
+
+
+================================================
+FILE: source/CS200/OffscreenFramebuffer.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+
+#include "OffscreenFramebuffer.h"
+#include "OpenGL/GL.h"
+#include <algorithm>
+#include <iostream>
+
+namespace
+{
+    int ValidateMSAASamples(int samples)
+    {
+        GLint max_samples = 0;
+        GL::GetIntegerv(GL_MAX_SAMPLES, &max_samples);
+
+        samples = std::max(2, std::min(samples, max_samples));
+
+        samples = samples & ~1;
+
+        return samples;
+    }
+}
+
+OffscreenFramebuffer::~OffscreenFramebuffer()
+{
+    Shutdown();
+}
+
+void OffscreenFramebuffer::Initialize(int width, int height, [[maybe_unused]] MSAA use_msaa, [[maybe_unused]] int msaa_samples)
+{
+    currentWidth  = width;
+    currentHeight = height;
+
+    useMSAA       = (use_msaa == MSAA::True);
+    msaaSamples   = ValidateMSAASamples(msaa_samples);
+
+    createResolveFramebuffer();
+    createMSAAFramebuffer();
+}
+
+void OffscreenFramebuffer::BindForRendering()
+{
+
+    GLuint target = useMSAA ? msaaFramebuffer : resolveFramebuffer;
+    // GLuint target = resolveFramebuffer;
+    GL::BindFramebuffer(GL_FRAMEBUFFER, target);
+}
+
+OpenGL::TextureHandle OffscreenFramebuffer::GetTexture()
+{
+    resolveMSAA();
+    return resolveTexture;
+}
+
+void OffscreenFramebuffer::Resize(int width, int height)
+{
+    currentWidth  = width;
+    currentHeight = height;
+
+    createResolveFramebuffer();
+    createMSAAFramebuffer();
+}
+
+void OffscreenFramebuffer::SetMSAA([[maybe_unused]] MSAA use_msaa, [[maybe_unused]] int msaa_samples)
+{
+    useMSAA     = use_msaa == MSAA::False ? false : true;
+    msaaSamples = ValidateMSAASamples(msaa_samples);
+
+    if (currentWidth > 0 && currentHeight > 0)
+    {
+        createMSAAFramebuffer();
+    }
+}
+
+void OffscreenFramebuffer::Shutdown()
+{
+    if (resolveFramebuffer != 0)
+    {
+        GL::DeleteFramebuffers(1, &resolveFramebuffer);resolveFramebuffer = 0;
+    }
+    if (resolveTexture != 0)
+    {
+        GL::DeleteTextures(1, &resolveTexture);resolveTexture = 0;
+    }
+
+    if (msaaFramebuffer != 0)
+    {
+        GL::DeleteFramebuffers(1, &msaaFramebuffer);msaaFramebuffer = 0;
+    }
+    if (msaaColorRenderbuffer != 0)
+    {
+        GL::DeleteRenderbuffers(1, &msaaColorRenderbuffer);msaaColorRenderbuffer = 0;
+    }
+
+    if (depthRenderbuffer != 0)
+    {
+        GL::DeleteRenderbuffers(1, &depthRenderbuffer);
+        depthRenderbuffer = 0;
+    }
+}
+
+void OffscreenFramebuffer::createResolveFramebuffer()
+{
+    if (resolveFramebuffer == 0)
+    {
+        GL::GenFramebuffers(1, &resolveFramebuffer);
+    }
+
+    if (resolveTexture != 0)
+    {
+        GL::DeleteTextures(1, &resolveTexture);
+        resolveTexture = 0;
+    }
+
+    GL::GenTextures(1, &resolveTexture);
+    GL::BindTexture(GL_TEXTURE_2D, resolveTexture);
+    GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+#ifdef IS_WEBGL2
+    GL::TexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, currentWidth, currentHeight);
+#else
+    GL::TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, currentWidth, currentHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+#endif
+    GL::BindTexture(GL_TEXTURE_2D, 0);
+    GL::BindFramebuffer(GL_FRAMEBUFFER, resolveFramebuffer);
+    GL::FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, resolveTexture, 0);
+
+    if (!useMSAA) 
+    {
+        if (depthRenderbuffer != 0) { GL::DeleteRenderbuffers(1, &depthRenderbuffer); depthRenderbuffer = 0; }
+        GL::GenRenderbuffers(1, &depthRenderbuffer);
+        GL::BindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);
+        GL::RenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, currentWidth, currentHeight);
+        GL::BindRenderbuffer(GL_RENDERBUFFER, 0);
+
+        GL::FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, depthRenderbuffer);
+    }
+    auto status = GL::CheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE)
+    {
+        std::cerr << "Failed to create resolve framebuffer\n";
+        std::exit(-1);
+    }
+    GL::BindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void OffscreenFramebuffer::createMSAAFramebuffer()
+{
+    if (!useMSAA)
+        return;
+
+    if (msaaFramebuffer == 0)
+    {
+        GL::GenFramebuffers(1, &msaaFramebuffer);
+    }
+
+    if (msaaColorRenderbuffer != 0)
+    {
+        GL::DeleteRenderbuffers(1, &msaaColorRenderbuffer);
+        msaaColorRenderbuffer = 0;
+    }
+
+    GL::GenRenderbuffers(1, &msaaColorRenderbuffer);
+    GL::BindRenderbuffer(GL_RENDERBUFFER, msaaColorRenderbuffer);
+    GL::RenderbufferStorageMultisample(GL_RENDERBUFFER, msaaSamples, GL_RGBA8, currentWidth, currentHeight);
+    GL::BindRenderbuffer(GL_RENDERBUFFER, 0);
+
+    GL::BindFramebuffer(GL_FRAMEBUFFER, msaaFramebuffer);
+    GL::FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, msaaColorRenderbuffer);
+
+    if (depthRenderbuffer != 0) { GL::DeleteRenderbuffers(1, &depthRenderbuffer); depthRenderbuffer = 0; }
+    GL::GenRenderbuffers(1, &depthRenderbuffer);
+    GL::BindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);
+    //use GL::RenderbufferStorageMultisample to create a multisampled depth-stencil renderbuffer
+    GL::RenderbufferStorageMultisample(GL_RENDERBUFFER, msaaSamples, GL_DEPTH24_STENCIL8, currentWidth, currentHeight);
+    GL::BindRenderbuffer(GL_RENDERBUFFER, 0);
+
+
+    GL::FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, depthRenderbuffer);
+    auto status = GL::CheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE)
+    {
+        std::cerr << "Failed to create MSAA framebuffer\n";
+        std::exit(-1);
+    }
+    GL::BindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void OffscreenFramebuffer::resolveMSAA()
+{
+
+    if (!useMSAA)
+        return;
+
+    GL::BindFramebuffer(GL_READ_FRAMEBUFFER, msaaFramebuffer);
+    GL::BindFramebuffer(GL_DRAW_FRAMEBUFFER, resolveFramebuffer);
+    GL::BlitFramebuffer(0, 0, currentWidth, currentHeight, 0, 0, currentWidth, currentHeight, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    GL::BindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+
+
+================================================
+FILE: source/CS200/OffscreenFramebuffer.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+
+#pragma once
+
+#include "OpenGL/Shader.h"
+#include "OpenGL/Framebuffer.h"
+#include <GL/glew.h>
+
+class OffscreenFramebuffer
+{
+public:
+    OffscreenFramebuffer() = default;
+    ~OffscreenFramebuffer();
+
+
+    OffscreenFramebuffer(const OffscreenFramebuffer&)            = delete;
+    OffscreenFramebuffer& operator=(const OffscreenFramebuffer&) = delete;
+
+    enum class MSAA : bool
+    {
+        False,
+        True
+    };
+    void   Initialize(int width, int height, MSAA use_msaa = MSAA::False, int msaa_samples = 4);
+    void   BindForRendering();
+    OpenGL::TextureHandle GetTexture();
+    void   Resize(int width, int height);
+    void   SetMSAA(MSAA use_msaa, int msaa_samples);
+
+    int GetMSAASamples() const
+    {
+        return msaaSamples;
+        // return 0;
+    }
+
+    void Shutdown();
+
+private:
+    int            currentWidth{ 0 };
+    int            currentHeight{ 0 };
+
+    bool           useMSAA{ false };
+    int            msaaSamples{ 4 };
+    OpenGL::FramebufferHandle resolveFramebuffer{ 0 };
+    OpenGL::TextureHandle resolveTexture{ 0 };
+
+    OpenGL::FramebufferHandle msaaFramebuffer{ 0 };
+    OpenGL::Handle msaaColorRenderbuffer{ 0 };
+    OpenGL::Handle depthRenderbuffer{ 0 };
+
+    void createResolveFramebuffer();
+    void createMSAAFramebuffer();
+    void resolveMSAA();
+};
+
+
+
+================================================
+FILE: source/CS200/PostProcessingPipeline.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+
+#include "PostProcessingPipeline.h"
+
+#include "OpenGL/GL.h"
+#include "OpenGL/Buffer.h"
+#include "OpenGL/VertexArray.h"
+#include <array>
+#include <iostream>
+
+PostProcessingPipeline::~PostProcessingPipeline()
+{
+    Shutdown();
+}
+
+void PostProcessingPipeline::Initialize(int width, int height)
+{
+    currentWidth  = width;
+    currentHeight = height;
+
+    setupFullscreenTriangle();
+
+    for (auto& effect : effects)
+    {
+        createFramebuffer(effect);
+    }
+}
+
+void PostProcessingPipeline::AddEffect(PostProcessingEffect&& effect)
+{
+    effects.push_back(std::move(effect));
+
+    if (currentWidth > 0 && currentHeight > 0)
+    {
+        createFramebuffer(effects.back());
+    }
+}
+
+OpenGL::TextureHandle PostProcessingPipeline::Apply(OpenGL::TextureHandle input_texture)
+{
+    OpenGL::TextureHandle current_texture = input_texture;
+
+    for (const auto& effect : effects)
+    {
+        if (effect.Enabled == PostProcessingEffect::Enable::True && effect.Framebuffer)
+        {
+            renderEffect(effect, current_texture);
+            current_texture = effect.Framebuffer->GetTexture();
+        }
+    }
+
+    return current_texture;
+}
+
+void PostProcessingPipeline::Resize(int width, int height)
+{
+    currentWidth  = width;
+    currentHeight = height;
+
+    for (auto& effect : effects)
+    {
+        if (effect.Framebuffer)
+        {
+            effect.Framebuffer->Resize(currentWidth, currentHeight);
+        }
+    }
+}
+
+void PostProcessingPipeline::Shutdown()
+{
+    for (auto& effect : effects)
+    {
+        if (effect.Framebuffer)
+        {
+            effect.Framebuffer->Shutdown();
+            effect.Framebuffer.reset();
+        }
+        if (effect.Shader.Shader != 0)
+        {
+            GL::DeleteProgram(effect.Shader.Shader);
+            effect.Shader.Shader = 0;
+        }
+    }
+    effects.clear();
+
+    if (fullscreenVAO != 0)
+    {
+        GL::DeleteVertexArrays(1, &fullscreenVAO);
+        fullscreenVAO = 0;
+    }
+    if (fullscreenVBO != 0)
+    {
+        GL::DeleteBuffers(1, &fullscreenVBO);
+        fullscreenVBO = 0;
+    }
+}
+
+PostProcessingEffect* PostProcessingPipeline::GetEffect(const std::string& name)
+{
+    for (auto& effect : effects)
+    {
+        if (effect.Name == name)
+        {
+            return &effect;
+        }
+    }
+    return nullptr;
+}
+
+void PostProcessingPipeline::createFramebuffer(PostProcessingEffect& effect)
+{
+    if (!effect.Framebuffer)
+    {
+        effect.Framebuffer = std::make_unique<OffscreenFramebuffer>();
+    }
+
+    effect.Framebuffer->Initialize(currentWidth, currentHeight, OffscreenFramebuffer::MSAA::False);
+}
+
+void PostProcessingPipeline::renderEffect(const PostProcessingEffect& effect, GLuint input_texture)
+{
+    effect.Framebuffer->BindForRendering();
+    GL::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    GL::Clear(GL_COLOR_BUFFER_BIT);
+    GL::Viewport(0, 0, currentWidth, currentHeight);
+
+    GL::UseProgram(effect.Shader.Shader);
+
+    effect.SetUniforms(effect.Shader);
+
+    GL::ActiveTexture(GL_TEXTURE0);
+    GL::BindTexture(GL_TEXTURE_2D, input_texture);
+    GL::Uniform1i(effect.Shader.UniformLocations.at("uColorTexture"), 0);
+
+    GL::BindVertexArray(fullscreenVAO);
+    GL::DrawArrays(GL_TRIANGLES, 0, fullscreenVertexCount);
+    GL::BindVertexArray(0);
+    GL::BindTexture(GL_TEXTURE_2D, 0);
+    GL::UseProgram(0);
+    GL::BindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void PostProcessingPipeline::setupFullscreenTriangle()
+{
+    struct FullscreenVertex
+    {
+        float x, y;
+        float u, v;
+    };
+
+    const FullscreenVertex vertices[] = {
+        { -1.0f, -1.0f, 0.0f, 0.0f },
+        {  3.0f, -1.0f, 2.0f, 0.0f },
+        { -1.0f,  3.0f, 0.0f, 2.0f },
+    };
+
+    fullscreenVertexCount = static_cast<GLsizei>(std::ssize(vertices));
+
+    fullscreenVBO = OpenGL::CreateBuffer(OpenGL::BufferType::Vertices, std::as_bytes(std::span{ vertices }));
+
+    const auto layout = {
+        OpenGL::VertexBuffer{ 
+            fullscreenVBO, 
+            { 
+                OpenGL::Attribute::Float2, // Position
+                OpenGL::Attribute::Float2  // UV
+            } 
+        }
+    };
+
+    fullscreenVAO = OpenGL::CreateVertexArrayObject(layout);
+}
+
+
+
+================================================
+FILE: source/CS200/PostProcessingPipeline.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+
+#pragma once
+
+#include "OffscreenFramebuffer.h"
+#include "OpenGL/Shader.h"
+#include "OpenGL/Texture.h"
+#include <GL/glew.h>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
+struct PostProcessingEffect
+{
+    std::string Name;
+    enum class Enable : bool
+    {
+        False,
+        True
+    };
+    Enable                                Enabled;
+    OpenGL::CompiledShader                Shader;
+    std::unique_ptr<OffscreenFramebuffer> Framebuffer;
+
+    using SetUniformsFunction = std::function<void(const OpenGL::CompiledShader&)>;
+    SetUniformsFunction SetUniforms;
+
+    PostProcessingEffect(
+        const std::string& name, Enable enabled, OpenGL::CompiledShader shader, SetUniformsFunction set_uniforms = [](const OpenGL::CompiledShader&) { })
+        : Name(name), Enabled(enabled), Shader(shader), Framebuffer(nullptr), SetUniforms(set_uniforms)
+    {
+    }
+};
+
+class PostProcessingPipeline
+{
+public:
+    PostProcessingPipeline() = default;
+    ~PostProcessingPipeline();
+
+    PostProcessingPipeline(const PostProcessingPipeline&)            = delete;
+    PostProcessingPipeline& operator=(const PostProcessingPipeline&) = delete;
+
+    void                  Initialize(int width, int height);
+    void                  AddEffect(PostProcessingEffect&& effect);
+    OpenGL::TextureHandle Apply(OpenGL::TextureHandle input_texture);
+    void                  Resize(int width, int height);
+    void                  Shutdown();
+    PostProcessingEffect* GetEffect(const std::string& name);
+
+private:
+    std::vector<PostProcessingEffect> effects{};
+    int                               currentWidth{ 0 };
+    int                               currentHeight{ 0 };
+    OpenGL::Handle                    fullscreenVAO{ 0 };
+    OpenGL::Handle                    fullscreenVBO{ 0 };
+    GLsizei                           fullscreenVertexCount{ 0 };
+
+    void createFramebuffer(PostProcessingEffect& effect);
+    void renderEffect(const PostProcessingEffect& effect, GLuint input_texture);
+    void setupFullscreenTriangle();
+};
+
+
+
+================================================
+FILE: source/CS200/Renderer2DUtils.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#include "Renderer2DUtils.h"
+
+#include <algorithm>
+#include <cmath>
+
+namespace CS200::Renderer2DUtils
+{
+    Math::TransformationMatrix CalculateLineTransform(const Math::TransformationMatrix& transform, const Math::vec2& start_point, const Math::vec2& end_point, double line_width) noexcept
+    {
+        const Math::vec2 line_vector = end_point - start_point;
+
+        const double            angle             = std::atan2(line_vector.y, line_vector.x);
+        constexpr double        center_multiplier = 0.5;
+        const Math::vec2        center_point      = (start_point + end_point) * center_multiplier;
+        const Math::ScaleMatrix scale_matrix{
+            { line_vector.Length(), line_width }
+        };
+        const Math::RotationMatrix    rotation_matrix{ angle };
+        const Math::TranslationMatrix translation_matrix{ center_point };
+        const auto                    final_transform = transform * translation_matrix * rotation_matrix * scale_matrix;
+        return final_transform;
+    }
+
+    SDFTransform CalculateSDFTransform(const Math::TransformationMatrix& transform, double line_width) noexcept
+    {
+        const vec2  world_size{ static_cast<float>(std::sqrt(transform[0][0] * transform[0][0] + transform[1][0] * transform[1][0])),
+                               static_cast<float>(std::sqrt(transform[0][1] * transform[0][1] + transform[1][1] * transform[1][1])) };
+        const float line_width_addition = std::max(static_cast<float>(line_width), 0.0f);
+        const vec2  quad_size           = { world_size[0] + line_width_addition, world_size[1] + line_width_addition };
+
+        const vec2 scale_up       = { quad_size[0] / world_size[0], quad_size[1] / world_size[1] };
+        mat3       quad_transform = to_opengl_mat3(transform);
+        quad_transform[0] *= scale_up[0];
+        quad_transform[1] *= scale_up[0];
+        quad_transform[3] *= scale_up[1];
+        quad_transform[4] *= scale_up[1];
+        return { quad_transform, world_size, quad_size };
+    }
+}
+
+
+
+================================================
+FILE: source/CS200/Renderer2DUtils.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+
+#include "Engine/Matrix.h"
+#include "Engine/Vec2.h"
+#include "RGBA.h"
+#include <array>
+#include <optional>
+
+namespace CS200::Renderer2DUtils
+{
+    
+    using mat3 = std::array<float, 9>; 
+    using vec2 = std::array<float, 2>; 
+
+   
+    inline mat3 to_opengl_mat3(const Math::TransformationMatrix& transform) noexcept
+    {
+        return { static_cast<float>(transform[0][0]), static_cast<float>(transform[1][0]), static_cast<float>(transform[2][0]),
+                 static_cast<float>(transform[0][1]), static_cast<float>(transform[1][1]), static_cast<float>(transform[2][1]),
+                 static_cast<float>(transform[0][2]), static_cast<float>(transform[1][2]), static_cast<float>(transform[2][2]) };
+    }
+
+    
+    Math::TransformationMatrix CalculateLineTransform(const Math::TransformationMatrix& transform, const Math::vec2& start_point, const Math::vec2& end_point, double line_width) noexcept;
+
+    
+    struct SDFTransform
+    {
+        mat3 QuadTransform; 
+        vec2 WorldSize;     
+        vec2 QuadSize;      
+    };
+
+    
+    SDFTransform CalculateSDFTransform(const Math::TransformationMatrix& transform, double line_width) noexcept;
+}
+
+
+
+================================================
+FILE: source/CS200/RenderingAPI.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#include "RenderingAPI.h"
+
+#include "Engine/Engine.h"
+#include "Engine/Error.h"
+#include "Engine/Logger.h"
+#include "OpenGL/Environment.h"
+#include <GL/glew.h>
+#include <cassert>
+
+#include "OpenGL/GL.h"
+
+namespace
+{
+#if defined(DEVELOPER_VERSION) && not defined(IS_WEBGL2)
+    void OpenGLMessageCallback(
+        [[maybe_unused]] unsigned source, [[maybe_unused]] unsigned type, [[maybe_unused]] unsigned id, unsigned severity, [[maybe_unused]] int length, const char* message,
+        [[maybe_unused]] const void* userParam)
+    {
+        switch (severity)
+        {
+            case GL_DEBUG_SEVERITY_HIGH: Engine::GetLogger().LogError(message); return;
+            case GL_DEBUG_SEVERITY_MEDIUM: Engine::GetLogger().LogError(message); return;
+            case GL_DEBUG_SEVERITY_LOW: Engine::GetLogger().LogVerbose(message); return;
+            case GL_DEBUG_SEVERITY_NOTIFICATION: Engine::GetLogger().LogVerbose(message); return;
+        }
+
+        assert(false && "Unknown severity level!");
+    }
+#endif
+}
+
+namespace CS200::RenderingAPI
+{
+    void Init() noexcept
+    {
+        GLint major = 0, minor = 0;
+
+        GL::GetIntegerv(GL_MAJOR_VERSION, &major);
+        GL::GetIntegerv(GL_MINOR_VERSION, &minor);
+        if (OpenGL::version(major, minor) < OpenGL::version(OpenGL::MinimumRequiredMajorVersion, OpenGL::MinimumRequiredMinorVersion))
+            throw_error_message("Unsupported OpenGL version ", major, '.', minor, "\n We need OpenGL ", OpenGL::MinimumRequiredMajorVersion, '.', OpenGL::MinimumRequiredMinorVersion, " or higher");
+
+        if (OpenGL::MajorVersion == 0)
+        {
+            OpenGL::MajorVersion = major;
+            OpenGL::MinorVersion = minor;
+        }
+
+        GL::GetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &OpenGL::MaxTextureImageUnits);
+        GL::GetIntegerv(GL_MAX_TEXTURE_SIZE, &OpenGL::MaxTextureSize);
+        GL::GetIntegerv(GL_MAJOR_VERSION, &OpenGL::MajorVersion);
+        GL::GetIntegerv(GL_MINOR_VERSION, &OpenGL::MinorVersion);
+        int max_element_vertices;
+        GL::GetIntegerv(GL_MAX_ELEMENTS_VERTICES, &max_element_vertices);
+        int max_element_indices;
+        GL::GetIntegerv(GL_MAX_ELEMENTS_INDICES, &max_element_indices);
+        int max_viewport_dims[2];
+        GL::GetIntegerv(GL_MAX_VIEWPORT_DIMS, max_viewport_dims);
+
+#if defined(DEVELOPER_VERSION) && not defined(IS_WEBGL2)
+        // Debug callback functionality requires OpenGL 4.3+ or KHR_debug extension
+        if (OpenGL::current_version() >= OpenGL::version(4, 3))
+        {
+            GL::Enable(GL_DEBUG_OUTPUT);
+            GL::Enable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+            GL::DebugMessageCallback(OpenGLMessageCallback, nullptr);
+            GL::DebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
+        }
+#endif
+
+        GL::Enable(GL_BLEND);
+        GL::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        //GL::Disable(GL_DEPTH_TEST);
+		GL::Enable(GL_DEPTH_TEST);
+
+        // GL_MAX_TEXTURE_IMAGE_UNITS, GL_MAX_TEXTURE_SIZE, GL_MAX_VIEWPORT_DIMS
+        Engine::GetLogger().LogDebug("VENDOR : " + std::to_string(GL_VENDOR));
+        Engine::GetLogger().LogDebug("RENDERER : " + std::to_string(GL_RENDERER));
+        Engine::GetLogger().LogDebug("VERSION : " + std::to_string(GL_VERSION));
+        Engine::GetLogger().LogDebug("SHADING LANGUAGE VERSION : " + std::to_string(GL_SHADING_LANGUAGE_VERSION));
+        Engine::GetLogger().LogDebug("MAJOR VERSION : " + std::to_string(OpenGL::MajorVersion));
+        Engine::GetLogger().LogDebug("MINOR VERSION : " + std::to_string(OpenGL::MinorVersion));
+        Engine::GetLogger().LogDebug("MAX ELEMENTS VERTICES : " + std::to_string(max_element_vertices));
+        Engine::GetLogger().LogDebug("MAX ELEMENTS INDICES : " + std::to_string(max_element_indices));
+        Engine::GetLogger().LogDebug("MAX TEXTURE IMAGE UNITS : " + std::to_string(OpenGL::MaxTextureImageUnits));
+        Engine::GetLogger().LogDebug("MAX TEXTURE SIZE : " + std::to_string(OpenGL::MaxTextureSize));
+        Engine::GetLogger().LogDebug("MAX VIEWPORT DIMS : " + std::to_string(max_viewport_dims[0]) + ", " + std::to_string(max_viewport_dims[1]));
+    }
+
+    void SetClearColor(CS200::RGBA color) noexcept
+    {
+        const auto rgba = CS200::unpack_color(color);
+        GL::ClearColor(rgba[0], rgba[1], rgba[2], rgba[3]);
+    }
+
+    void Clear() noexcept
+    {
+        //GL::Clear(GL_COLOR_BUFFER_BIT);
+		GL::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    }
+
+    void SetViewport(Math::ivec2 size, Math::ivec2 anchor_left_bottom) noexcept
+    {
+        GL::Viewport(anchor_left_bottom.x, anchor_left_bottom.y, size.x, size.y);
+    }
+}
+
+
+
+================================================
+FILE: source/CS200/RenderingAPI.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+
+#include "Engine/Vec2.h"
+#include "RGBA.h"
+
+namespace CS200::RenderingAPI
+{
+    void Init() noexcept;
+    void SetClearColor(CS200::RGBA color) noexcept;
+    void Clear() noexcept;
+    void SetViewport(Math::ivec2 size, Math::ivec2 anchor_left_bottom = { 0, 0 }) noexcept;
+}
+
+
+
+================================================
+FILE: source/CS200/RGBA.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+
+#include <array>
+#include <cstdint>
+
+namespace CS200
+{
+    /**
+     * \brief Compact 32-bit color representation for efficient graphics operations
+     *
+     * RGBA provides a memory-efficient way to store and manipulate colors using a single
+     * 32-bit integer. This format is widely used in graphics programming because it packs
+     * four 8-bit color channels (Red, Green, Blue, Alpha) into one value that can be
+     * easily passed around, stored in arrays, and processed by graphics hardware.
+     *
+     * The color format uses the layout: 0xRRGGBBAA where:
+     * - RR = Red channel (bits 31-24)
+     * - GG = Green channel (bits 23-16)
+     * - BB = Blue channel (bits 15-8)
+     * - AA = Alpha channel (bits 7-0)
+     *
+     * Each channel ranges from 0x00 (0) to 0xFF (255), providing 256 levels per channel
+     * and over 16 million possible color combinations with transparency support.
+     *
+     * This compact representation is ideal for:
+     * - Storing vertex colors in graphics buffers
+     * - Passing colors as function parameters
+     * - Performing fast bitwise color operations
+     * - Interfacing with graphics APIs that expect packed colors
+     */
+    using RGBA = uint32_t;
+
+    /** \brief Pure white color (255, 255, 255, 255) - fully opaque white */
+    constexpr RGBA WHITE = 0xffffffff;
+
+    /** \brief Pure black color (0, 0, 0, 255) - fully opaque black */
+    constexpr RGBA BLACK = 0x000000ff;
+
+    /** \brief Transparent color (0, 0, 0, 0) - completely transparent black */
+    constexpr RGBA CLEAR = 0x00000000;
+
+    /** \brief Light Gray color (200, 200, 200, 255) */
+    constexpr RGBA LIGHTGRAY = 0xc8c8c8ff;
+
+    /** \brief Gray color (130, 130, 130, 255) */
+    constexpr RGBA GRAY = 0x828282ff;
+
+    /** \brief Dark Gray color (80, 80, 80, 255) */
+    constexpr RGBA DARKGRAY = 0x505050ff;
+
+    /** \brief Yellow color (253, 249, 0, 255) */
+    constexpr RGBA YELLOW = 0xfdf900ff;
+
+    /** \brief Gold color (255, 203, 0, 255) */
+    constexpr RGBA GOLD = 0xffcb00ff;
+
+    /** \brief Orange color (255, 161, 0, 255) */
+    constexpr RGBA ORANGE = 0xffa100ff;
+
+    /** \brief Pink color (255, 109, 194, 255) */
+    constexpr RGBA PINK = 0xff6dc2ff;
+
+    /** \brief Red color (230, 41, 55, 255) */
+    constexpr RGBA RED = 0xe62937ff;
+
+    /** \brief Maroon color (190, 33, 55, 255) */
+    constexpr RGBA MAROON = 0xbe2137ff;
+
+    /** \brief Green color (0, 228, 48, 255) */
+    constexpr RGBA GREEN = 0x00e430ff;
+
+    /** \brief Lime color (0, 158, 47, 255) */
+    constexpr RGBA LIME = 0x009e2fff;
+
+    /** \brief Dark Green color (0, 117, 44, 255) */
+    constexpr RGBA DARKGREEN = 0x00752cff;
+
+    /** \brief Sky Blue color (102, 191, 255, 255) */
+    constexpr RGBA SKYBLUE = 0x66bffff;
+
+    /** \brief Blue color (0, 121, 241, 255) */
+    constexpr RGBA BLUE = 0x0079f1ff;
+
+    /** \brief Dark Blue color (0, 82, 172, 255) */
+    constexpr RGBA DARKBLUE = 0x0052acff;
+
+    /** \brief Purple color (200, 122, 255, 255) */
+    constexpr RGBA PURPLE = 0xc87affff;
+
+    /** \brief Violet color (135, 60, 190, 255) */
+    constexpr RGBA VIOLET = 0x873cbeff;
+
+    /** \brief Dark Purple color (112, 31, 126, 255) */
+    constexpr RGBA DARKPURPLE = 0x701f7eff;
+
+    /** \brief Beige color (211, 176, 131, 255) */
+    constexpr RGBA BEIGE = 0xd3b083ff;
+
+    /** \brief Brown color (127, 106, 79, 255) */
+    constexpr RGBA BROWN = 0x7f6a4fff;
+
+    /** \brief Dark Brown color (76, 63, 47, 255) */
+    constexpr RGBA DARKBROWN = 0x4c3f2fff;
+
+    /** \brief Magenta color (255, 0, 255, 255) */
+    constexpr RGBA MAGENTA = 0xff00ffff;
+
+
+
+    /**
+     * \brief Convert packed RGBA color to floating-point component array
+     * \param rgba 32-bit packed color in RGBA format
+     * \return Array of 4 floats [r, g, b, a] normalized to [0.0, 1.0] range
+     *
+     * Unpacks a compact RGBA color into separate floating-point components that
+     * are commonly required by graphics APIs like OpenGL. Each 8-bit integer
+     * channel (0-255) is converted to a normalized float (0.0-1.0).
+     *
+     * This conversion is essential for:
+     * - Passing colors to OpenGL shader uniforms
+     * - Performing floating-point color math operations
+     * - Interfacing with APIs that expect normalized color values
+     * - Blending and interpolation calculations
+     *
+     * The bit extraction isolates each color channel:
+     * - Red: (rgba & 0xff000000) >> 24
+     * - Green: (rgba & 0x00ff0000) >> 16
+     * - Blue: (rgba & 0x0000ff00) >> 8
+     * - Alpha: (rgba & 0x000000ff) >> 0
+     *
+     * Each extracted value is then divided by 255.0f to normalize to [0.0, 1.0].
+     */
+    constexpr std::array<float, 4> unpack_color(RGBA rgba) noexcept
+    {
+        constexpr float scale = 1.0f / 255.0f;
+        return { static_cast<float>((rgba & 0xff000000) >> 24) * scale, static_cast<float>((rgba & 0x00ff0000) >> 16) * scale, static_cast<float>((rgba & 0x0000ff00) >> 8) * scale,
+                 static_cast<float>((rgba & 0x000000ff) >> 0) * scale };
+    }
+
+    /**
+     * \brief Convert floating-point color components to packed RGBA format
+     * \param color Array of 4 floats [r, g, b, a] in normalized [0.0, 1.0] range
+     * \return 32-bit packed color in RGBA format (0xRRGGBBAA)
+     *
+     * Packs separate floating-point color components into a compact RGBA color
+     * suitable for efficient storage and graphics operations. This is the inverse
+     * operation of unpack_color(), converting normalized float values back into
+     * the 8-bit integer format used by graphics hardware and APIs.
+     *
+     * This conversion is essential for:
+     * - Converting computed color results back to graphics-friendly format
+     * - Storing blended or interpolated colors efficiently
+     * - Interfacing with graphics APIs that expect packed color values
+     * - Optimizing memory usage in color arrays and vertex buffers
+     *
+     * The packing process:
+     * 1. Scale each float component from [0.0, 1.0] to [0.0, 255.0]
+     * 2. Clamp values to valid range [0, 255] to handle out-of-bounds inputs
+     * 3. Convert to 8-bit integers (uint8_t)
+     * 4. Shift and combine channels into final RGBA format:
+     *    - Red: bits 31-24 (R << 24)
+     *    - Green: bits 23-16 (G << 16)
+     *    - Blue: bits 15-8 (B << 8)
+     *    - Alpha: bits 7-0 (A << 0)
+     *
+     * Input values are automatically clamped to [0.0, 1.0] range to prevent
+     * overflow and ensure valid color output even with out-of-range inputs.
+     */
+    constexpr RGBA pack_color(const std::array<float, 4>& color) noexcept
+    {
+        constexpr float scale = 255.0f;
+        const float     r = color[0] * scale, g = color[1] * scale, b = color[2] * scale, a = color[3] * scale;
+        const uint8_t   R = static_cast<uint8_t>(r <= 255.0f ? (r >= 0.0f ? r : 0.0f) : 255.0f);
+        const uint8_t   G = static_cast<uint8_t>(g <= 255.0f ? (g >= 0.0f ? g : 0.0f) : 255.0f);
+        const uint8_t   B = static_cast<uint8_t>(b <= 255.0f ? (b >= 0.0f ? b : 0.0f) : 255.0f);
+        const uint8_t   A = static_cast<uint8_t>(a <= 255.0f ? (a >= 0.0f ? a : 0.0f) : 255.0f);
+        return (static_cast<RGBA>(R) << 24) | (static_cast<RGBA>(G) << 16) | (static_cast<RGBA>(B) << 8) | (static_cast<RGBA>(A) << 0);
+    }
+    constexpr RGBA pack_color(const std::array<uint8_t, 4>& color) noexcept
+    {
+        return (static_cast<RGBA>(color[0]) << 24) | (static_cast<RGBA>(color[1]) << 16) | (static_cast<RGBA>(color[2]) << 8) | (static_cast<RGBA>(color[3]) << 0);
+    }
+    /**
+     * \brief Convert RGBA format to ABGR format by reversing byte order
+     * \param rgba Color in RGBA format (0xRRGGBBAA)
+     * \return Color converted to ABGR format (0xAABBGGRR)
+     *
+     * Converts between different color byte ordering formats that are used by
+     * various graphics systems and file formats. This conversion is necessary
+     * when interfacing with systems that expect colors in ABGR order instead
+     * of the standard RGBA order.
+     *
+     * The conversion process:
+     * 1. Extract each color channel from the original RGBA value
+     * 2. Rearrange the channels from RGBA order to ABGR order
+     * 3. Pack the rearranged channels into a new 32-bit value
+     *
+     * Common use cases:
+     * - Converting colors for specific graphics APIs or hardware
+     * - Interfacing with image file formats that use different byte orders
+     * - Preparing colors for systems with different endianness
+     * - Working with legacy graphics formats that expect ABGR ordering
+     *
+     * The byte reversal ensures compatibility across different systems while
+     * maintaining the same color information in a different memory layout.
+     */
+    constexpr uint32_t rgba_to_abgr(RGBA rgba) noexcept
+    {
+        const uint8_t r = static_cast<uint8_t>((rgba & 0xff000000) >> 24);
+        const uint8_t g = static_cast<uint8_t>((rgba & 0x00ff0000) >> 16);
+        const uint8_t b = static_cast<uint8_t>((rgba & 0x0000ff00) >> 8);
+        const uint8_t a = static_cast<uint8_t>((rgba & 0x000000ff) >> 0);
+
+        return (static_cast<uint32_t>(a) << 24) | (static_cast<uint32_t>(b) << 16) | (static_cast<uint32_t>(g) << 8) | (static_cast<uint32_t>(r) << 0);
+    }
+
+    constexpr uint32_t argb_to_rgba(RGBA rgba) noexcept
+    {
+        const uint8_t r = static_cast<uint8_t>((rgba & 0x00ff0000) >> 16);
+        const uint8_t g = static_cast<uint8_t>((rgba & 0x0000ff00) >> 8);
+        const uint8_t b = static_cast<uint8_t>((rgba & 0x000000ff) >> 0);
+        const uint8_t a = static_cast<uint8_t>((rgba & 0xff000000) >> 24);
+
+        return (static_cast<uint32_t>(a) << 24) | (static_cast<uint32_t>(b) << 16) | (static_cast<uint32_t>(g) << 8) | (static_cast<uint32_t>(r) << 0);
+    }
+
+    constexpr std::array<unsigned char, 4> ColorArray(RGBA rgba)
+    {
+        return std::array<unsigned char, 4>({ static_cast<unsigned char>((rgba & 0xff000000) >> 24), static_cast<unsigned char>((rgba & 0x00ff0000) >> 16),
+                                              static_cast<unsigned char>((rgba & 0x0000ff00) >> 8), static_cast<unsigned char>((rgba & 0x000000ff) >> 0) });
+    }
+
+
+}
+
+
+

@@ -1,0 +1,1709 @@
+================================================
+FILE: source/Engine/Vec2.h
+================================================
+/**
+ * \file
+ * \author Jonathan Holmes
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+#pragma once
+#include <cmath>
+#include <iostream>
+#include <limits>
+
+namespace Math
+{
+
+
+    struct vec2;
+    struct vec3;
+
+    struct [[nodiscard]] ivec2
+    {
+        int x{ 0 };
+        int y{ 0 };
+
+        // Constructors
+        ivec2() noexcept = default;
+        // ivec2(int _x, int _y) noexcept : x(_x), y(_y) { };
+        constexpr ivec2(int _x, int _y) noexcept : x(_x), y(_y) { };
+        // ivec2(const ivec2& rhs) = default;
+        //  ivec2(int xy) noexcept;
+
+        // Conversion
+        ivec2(const vec2& v) noexcept;
+
+        // Arithmetic operators
+        ivec2& operator+=(const ivec2& rhs) noexcept;
+        ivec2& operator-=(const ivec2& rhs) noexcept;
+        ivec2& operator*=(int scalar) noexcept;
+        ivec2& operator/=(int scalar) noexcept;
+
+        // Unary operators
+        ivec2 operator+() const noexcept;
+        ivec2 operator-() const noexcept;
+
+        // length
+        double Length();
+    };
+
+    // Non-member operators
+    ivec2 operator+(const ivec2& lhs, const ivec2& rhs) noexcept;
+    ivec2 operator-(const ivec2& lhs, const ivec2& rhs) noexcept;
+    ivec2 operator*(const ivec2& v, int scalar) noexcept;
+    ivec2 operator*(int scalar, const ivec2& v) noexcept;
+    ivec2 operator/(const ivec2& v, int scalar) noexcept;
+
+    // Comparison operators
+    bool operator==(const ivec2& lhs, const ivec2& rhs) noexcept;
+    bool operator!=(const ivec2& lhs, const ivec2& rhs) noexcept;
+
+    // Stream operators
+    std::ostream& operator<<(std::ostream& os, const ivec2& v);
+    std::istream& operator>>(std::istream& is, ivec2& v);
+
+    struct ivec3
+    {
+        int x{ 0 };
+        int y{ 0 };
+        int z{ 0 };
+
+        // Constructors
+        ivec3() noexcept = default;
+        ivec3(int _x, int _y, int _z) noexcept : x(_x), y(_y), z(_z) { };
+        // ivec3(const ivec3& rhs) = default;
+        //  ivec3(int xy) noexcept;
+
+        // Conversion
+        ivec3(const vec3& v) noexcept;
+
+        // Arithmetic operators
+        ivec3& operator+=(const ivec3& rhs) noexcept;
+        ivec3& operator-=(const ivec3& rhs) noexcept;
+        ivec3& operator*=(int scalar) noexcept;
+        ivec3& operator/=(int scalar) noexcept;
+
+        // Unary operators
+        ivec3 operator+() const noexcept;
+        ivec3 operator-() const noexcept;
+
+        // length
+        double Length();
+    };
+
+    // Non-member operators
+    ivec3 operator+(const ivec3& lhs, const ivec3& rhs) noexcept;
+    ivec3 operator-(const ivec3& lhs, const ivec3& rhs) noexcept;
+    ivec3 operator*(const ivec3& v, int scalar) noexcept;
+    ivec3 operator*(int scalar, const ivec3& v) noexcept;
+    ivec3 operator/(const ivec3& v, int scalar) noexcept;
+
+    // Comparison operators
+    bool operator==(const ivec3& lhs, const ivec3& rhs) noexcept;
+    bool operator!=(const ivec3& lhs, const ivec3& rhs) noexcept;
+
+    // Stream operators
+    std::ostream& operator<<(std::ostream& os, const ivec3& v);
+    std::istream& operator>>(std::istream& is, ivec3& v);
+
+    struct vec2
+    {
+        double x{ 0 };
+        double y{ 0 };
+
+        // Constructors
+        vec2() noexcept = default;
+        constexpr vec2(double _x, double _y) noexcept : x(_x), y(_y) { };
+        //  vec2(const vec2& v) noexcept = default;
+        // vec2(const vec2& rhs) = default;
+        //  vec2(int xy) noexcept;
+
+        // Conversion
+        vec2(const ivec2& v) noexcept : x(static_cast<double>(v.x)), y(static_cast<double>(v.y)) { };
+
+        // Arithmetic operators
+        vec2& operator+=(const vec2& rhs) noexcept;
+        vec2& operator-=(const vec2& rhs) noexcept;
+        vec2& operator*=(int scalar) noexcept;
+        vec2& operator/=(int scalar) noexcept;
+
+        // Unary operators
+        vec2 operator+() const noexcept;
+        vec2 operator-() const noexcept;
+
+        // length
+        double Length() const noexcept;
+
+        bool operator<(const vec2& other) const
+        {
+            return (x < other.x) || (x == other.x && y < other.y);
+        }
+
+        // normalize
+        vec2 Normalize();
+    };
+
+    // Non-member operators
+    vec2 operator+(const vec2& lhs, const vec2& rhs) noexcept;
+    vec2 operator-(const vec2& lhs, const vec2& rhs) noexcept;
+    vec2 operator*(const vec2& v, int scalar) noexcept;
+    vec2 operator*(int scalar, const vec2& v) noexcept;
+    vec2 operator*(const vec2& v, double scalar) noexcept;
+    vec2 operator*(double scalar, const vec2& v) noexcept;
+    vec2 operator/(const vec2& v, int scalar) noexcept;
+
+    // Comparison operators
+    bool operator==(const vec2& lhs, const vec2& rhs) noexcept;
+    bool operator!=(const vec2& lhs, const vec2& rhs) noexcept;
+
+    // Stream operators
+    std::ostream& operator<<(std::ostream& os, const vec2& v);
+    std::istream& operator>>(std::istream& is, vec2& v);
+
+    struct fvec2
+    {
+        float x{ 0 };
+        float y{ 0 };
+
+        // Constructors
+        fvec2() noexcept = default;
+        constexpr fvec2(float _x, float _y) noexcept : x(_x), y(_y) { };
+        //  vec2(const vec2& v) noexcept = default;
+        // vec2(const vec2& rhs) = default;
+        //  vec2(int xy) noexcept;
+
+        // Conversion
+        fvec2(const ivec2& v) noexcept : x(static_cast<float>(v.x)), y(static_cast<float>(v.y)) { };
+
+        // Arithmetic operators
+        fvec2& operator+=(const fvec2& rhs) noexcept;
+        fvec2& operator-=(const fvec2& rhs) noexcept;
+        fvec2& operator*=(int scalar) noexcept;
+        fvec2& operator/=(int scalar) noexcept;
+
+        // Unary operators
+        fvec2 operator+() const noexcept;
+        fvec2 operator-() const noexcept;
+
+        // length
+        float Length() const noexcept;
+
+        bool operator<(const fvec2& other) const
+        {
+            return (x < other.x) || (x == other.x && y < other.y);
+        }
+
+        // normalize
+        fvec2 Normalize();
+    };
+
+    // Non-member operators
+    fvec2 operator+(const fvec2& lhs, const fvec2& rhs) noexcept;
+    fvec2 operator-(const fvec2& lhs, const fvec2& rhs) noexcept;
+    fvec2 operator*(const fvec2& v, int scalar) noexcept;
+    fvec2 operator*(int scalar, const fvec2& v) noexcept;
+    fvec2 operator*(const fvec2& v, float scalar) noexcept;
+    fvec2 operator*(float scalar, const fvec2& v) noexcept;
+    fvec2 operator/(const fvec2& v, int scalar) noexcept;
+
+    // Comparison operators
+    bool operator==(const fvec2& lhs, const fvec2& rhs) noexcept;
+    bool operator!=(const fvec2& lhs, const fvec2& rhs) noexcept;
+
+    // Stream operators
+    std::ostream& operator<<(std::ostream& os, const fvec2& v);
+    std::istream& operator>>(std::istream& is, fvec2& v);
+
+    vec2 to_vec2(const fvec2& rhs);
+    vec2 to_vec2(const ivec2& rhs);
+    
+    fvec2 to_fvec2(const vec2& rhs);
+    fvec2 to_fvec2(const ivec2& rhs);
+
+    ivec2 to_ivec2(const fvec2& rhs);
+    ivec2 to_ivec2(const vec2& rhs);
+    
+
+    struct vec3
+    {
+        double x{ 0 };
+        double y{ 0 };
+        double z{ 0 };
+
+        // Constructors
+        vec3() noexcept = default;
+        vec3(double _x, double _y, double _z) noexcept : x(_x), y(_y), z(_z) { };
+        // vec3(const vec3& rhs) = default;
+        //  vec3(int xy) noexcept;
+
+        // Conversion
+        vec3(const ivec3& v) noexcept : x(static_cast<double>(v.x)), y(static_cast<double>(v.y)), z(static_cast<double>(v.z)) { };
+
+        // Arithmetic operators
+        vec3& operator+=(const vec3& rhs) noexcept;
+        vec3& operator-=(const vec3& rhs) noexcept;
+        vec3& operator*=(int scalar) noexcept;
+        vec3& operator/=(int scalar) noexcept;
+
+        // Unary operators
+        vec3 operator+() const noexcept;
+        vec3 operator-() const noexcept;
+
+        // length
+        double Length();
+    };
+
+    // Non-member operators
+    vec3 operator+(const vec3& lhs, const vec3& rhs) noexcept;
+    vec3 operator-(const vec3& lhs, const vec3& rhs) noexcept;
+    vec3 operator*(const vec3& v, int scalar) noexcept;
+    vec3 operator*(int scalar, const vec3& v) noexcept;
+    vec3 operator/(const vec3& v, int scalar) noexcept;
+
+    // Comparison operators
+    bool operator==(const vec3& lhs, const vec3& rhs) noexcept;
+    bool operator!=(const vec3& lhs, const vec3& rhs) noexcept;
+
+    // Stream operators
+    std::ostream& operator<<(std::ostream& os, const vec3& v);
+    std::istream& operator>>(std::istream& is, vec3& v);
+}
+
+
+
+================================================
+FILE: source/Engine/Window.cpp
+================================================
+/**
+ * \file Window.cpp
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+#include "Window.h"
+#include "../OpenGL/GL.h"
+#include "CS200/RenderingAPI.h"
+#include "Engine.h"
+#include "Error.h"
+#include "Logger.h"
+#include <GL/glew.h>
+#include <SDL.h>
+#include <functional>
+#include <sstream>
+
+namespace
+{
+    void hint_gl(SDL_GLattr attr, int value)
+    {
+        // // https://wiki.libsdl.org/SDL2/SDL_GL_SetAttribute
+        if (const auto success = SDL_GL_SetAttribute(attr, value); success != 0)
+        {
+            Engine::GetLogger().LogError(std::string{ "Failed to Set GL Attribute: " } + SDL_GetError());
+        }
+    }
+}
+
+namespace CS230
+{
+
+    /*Basic setup*/
+    void Window::setupSDLWindow(std::string_view title)
+    {
+        // Part 1 - Initialize SDL for visual use
+        if (SDL_Init(SDL_INIT_VIDEO) < 0)
+        {
+            throw_error_message("Failed to init SDK error: ", SDL_GetError());
+        }
+
+// Part 2 - Configure OpenGL context attributes (before window creation)
+#if defined(IS_WEBGL2)
+        hint_gl(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+        hint_gl(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+        hint_gl(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+#else
+        hint_gl(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+#endif
+        hint_gl(SDL_GL_DOUBLEBUFFER, true);
+        hint_gl(SDL_GL_STENCIL_SIZE, 8);
+        hint_gl(SDL_GL_DEPTH_SIZE, 24);
+        hint_gl(SDL_GL_RED_SIZE, 8);
+        hint_gl(SDL_GL_GREEN_SIZE, 8);
+        hint_gl(SDL_GL_BLUE_SIZE, 8);
+        hint_gl(SDL_GL_ALPHA_SIZE, 8);
+        hint_gl(SDL_GL_MULTISAMPLEBUFFERS, 1);
+        hint_gl(SDL_GL_MULTISAMPLESAMPLES, 4);
+
+        // Part 3 - Create the SDL window
+        sdl_window = SDL_CreateWindow(title.data(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, default_width, default_height, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+        if (sdl_window == nullptr)
+        {
+            throw_error_message("Failed to create window: ", SDL_GetError());
+        }
+    }
+
+    /*Setup GL*/
+    void Window::setupOpenGL()
+    {
+        // Create OpenGL context
+        if (gl_context = SDL_GL_CreateContext(sdl_window); gl_context == nullptr)
+        {
+            throw_error_message("Failed to create opengl context: ", SDL_GetError());
+        }
+
+        // Make context current
+        SDL_GL_MakeCurrent(sdl_window, gl_context);
+
+        // Initialize GLEW for extension loading
+        if (const auto result = glewInit(); GLEW_OK != result)
+        {
+            throw_error_message("Unable to initialize GLEW - error: ", glewGetErrorString(result));
+        }
+
+        // Configure VSync
+        constexpr int ADAPTIVE_VSYNC = -1;
+        constexpr int VSYNC          = 1;
+        if (const auto result = SDL_GL_SetSwapInterval(ADAPTIVE_VSYNC); result != 0)
+        {
+            SDL_GL_SetSwapInterval(VSYNC);
+        }
+
+        // Initialize our rendering abstraction layer
+        CS200::RenderingAPI::Init();
+    }
+
+    void Window::Start(std::string_view title)
+    {
+        setupSDLWindow(title);
+        setupOpenGL();
+        window_size.x = default_width;
+        window_size.y = default_height;
+
+        // Get actual drawable size for high-DPI displays
+        SDL_GL_GetDrawableSize(sdl_window, &window_size.x, &window_size.y);
+
+
+        GL::Viewport(0, 0, window_size.x, window_size.y);
+
+        // Set initial clear color through our rendering abstraction
+        CS200::RenderingAPI::SetClearColor(default_background);
+    }
+
+    void Window::Update()
+    {
+        SDL_GL_SwapWindow(sdl_window);
+
+
+        SDL_Event event{ 0 };
+        while (SDL_PollEvent(&event) != 0)
+        {
+            eventCallback(event);
+
+            switch (event.window.event)
+            {
+                case SDL_WINDOWEVENT_CLOSE: closed = true; break;
+                case SDL_WINDOWEVENT_RESIZED: window_size = { event.window.data1, event.window.data2 }; break;
+                case SDL_WINDOWEVENT_SIZE_CHANGED:
+                    SDL_GL_GetDrawableSize(sdl_window, &window_size.x, &window_size.y);
+                    GL::Viewport(0, 0, window_size.x, window_size.y);
+                    break;
+                    break;
+                default: break;
+            }
+        }
+    }
+
+    bool Window::IsClosed() const
+    {
+        return closed;
+    }
+
+    void Window::Clear(CS200::RGBA color)
+    {
+        auto c = CS200::unpack_color(color);
+        GL::ClearColor(c[0], c[1], c[2], c[3]);
+        GL::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    }
+
+    void Window::ForceResize(int desired_width, int desired_height)
+    {
+        SDL_SetWindowSize(sdl_window, desired_width, desired_height);
+        window_size.x = desired_width;
+        window_size.y = desired_height;
+    }
+
+    void Window::SetWindowPosition(int x, int y)
+    {
+        SDL_SetWindowPosition(sdl_window,x,y);
+    }
+
+    SDL_Window* Window::GetSDLWindow() const
+    {
+        return sdl_window;
+    }
+
+    SDL_GLContext Window::GetGLContext() const
+    {
+        return gl_context;
+    }
+
+    void Window::SetEventCallback(WindowEventCallback callback)
+    {
+        eventCallback = std::move(callback);
+    }
+
+    float Window::background_r = 0.0f;
+    float Window::background_g = 0.0f;
+    float Window::background_b = 0.0f;
+
+    void Window::SetBackgroundColor(float r, float g, float b) noexcept
+    {
+        background_r = r;
+        background_g = g;
+        background_b = b;
+    }
+
+    //Math::ivec2 Window::GetWindowSize() const
+    //{
+    //    return window_size;
+    //}
+
+    Window::~Window()
+    {
+        if (gl_context)
+        {
+            SDL_GL_DeleteContext(gl_context);
+        }
+        if (sdl_window)
+        {
+            SDL_DestroyWindow(sdl_window);
+        }
+
+        SDL_Quit();
+    }
+}
+
+
+
+================================================
+FILE: source/Engine/Window.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+#include "CS200/RGBA.h"
+#include "Vec2.h"
+#include <functional>
+#include <gsl/gsl>
+#include <string_view>
+
+struct SDL_Window;
+typedef void*           SDL_GLContext;
+typedef union SDL_Event SDL_Event;
+
+namespace CS230
+{
+    class Window
+    {
+    public:
+        Window() noexcept = default;
+        ~Window();
+
+        Window(const Window&)                = delete;
+        Window& operator=(const Window&)     = delete;
+        Window(Window&&) noexcept            = delete;
+        Window& operator=(Window&&) noexcept = delete;
+
+    public:
+        void Start(std::string_view title);
+        void Update();
+        bool IsClosed() const;
+
+        [[nodiscard]] Math::ivec2 GetSize() const noexcept
+        {
+            return { window_size.x, window_size.y };
+        }
+
+        double GetAspectRatio() const noexcept
+        {
+            return static_cast<double>(window_size.x) / static_cast<double>(window_size.y);
+		}
+
+        void          Clear(CS200::RGBA color);
+        void          ForceResize(int w, int h);
+        void          SetWindowPosition(int x, int y);
+        SDL_Window*   GetSDLWindow() const;
+        SDL_GLContext GetGLContext() const;
+
+        using WindowEventCallback = std::function<void(const SDL_Event&)>;
+        void SetEventCallback(WindowEventCallback callback);
+
+        static void SetBackgroundColor(float r, float g, float b) noexcept;
+
+        // Math::ivec2 GetWindowSize() const;
+
+    private:
+
+        void setupSDLWindow(std::string_view title);
+        void setupOpenGL();
+
+
+        const int                     default_width      = 800;
+        const int                     default_height     = 600;
+        Math::ivec2                   window_size        = { default_width, default_height };
+        static constexpr unsigned int default_background = UINT_MAX;
+        static constexpr CS200::RGBA  default_background1{ CS200::WHITE };
+
+        gsl::owner<SDL_Window*>   sdl_window = nullptr;
+        gsl::owner<SDL_GLContext> gl_context = nullptr;
+        bool                      closed     = false;
+        // Math::ivec2               size       = { 800, 600 };
+
+        WindowEventCallback eventCallback;
+
+        std::function<void(SDL_Event)> func_event_callback;
+        static float                   background_r;
+        static float                   background_g;
+        static float                   background_b;
+    };
+}
+
+
+
+================================================
+FILE: source/Game/Background.cpp
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Background.cpp
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    March 29, 2025
+*/
+
+#include "Background.h"
+#include "../Engine/TextureManager.h"
+
+void Background::Add(const std::filesystem::path& texture_path, double speed){
+	backgrounds.push_back(ParallaxLayer{Engine::GetTextureManager().Load(texture_path),speed});
+}
+
+void Background::Unload(){
+	backgrounds.clear();
+}
+
+void Background::Draw(const CS230::Camera& camera) {
+    for (ParallaxLayer& background : backgrounds) {
+        Math::vec2 inverted_position = -Math::vec2{ camera.GetPosition().x * background.speed, camera.GetPosition().y };
+        Math::TranslationMatrix new_matrix = Math::TranslationMatrix(inverted_position);
+        background.texture->Draw(new_matrix);
+    }
+}
+
+Math::ivec2 Background::GetSize()
+{
+	return backgrounds.back().texture->GetSize();
+}
+
+
+
+================================================
+FILE: source/Game/Background.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Background.h
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    March 29, 2025
+*/
+
+#pragma once
+#include "../Engine/Engine.h"
+#include "../Engine/Texture.h"
+#include "../Engine/Camera.h"
+#include "../Engine/Component.h"
+
+class Background : public CS230::Component{
+public:
+    void Add(const std::filesystem::path& texture_path, double speed);
+    void Unload();
+    void Draw(const CS230::Camera& camera);
+    Math::ivec2 GetSize();
+private:
+    struct ParallaxLayer {
+        std::shared_ptr<CS230::Texture> texture;
+        double speed = 1;
+    };
+
+    std::vector<ParallaxLayer> backgrounds;
+};
+
+
+
+
+================================================
+FILE: source/Game/GameObjectTypes.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  GameObjectTypes.h
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    May 20, 2025
+*/
+#pragma once
+enum class GameObjectTypes {
+    //Score,
+    Bus,
+    Player,
+    Food,
+    Passenger,
+    Obstacle,
+    Particle,
+    Character,
+    Samurai,
+    Triangle,
+    Stars,
+    Moon,
+    Road,
+    Count
+};
+
+
+
+================================================
+FILE: source/Game/MainMenu.cpp
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  MainMenu.cpp
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    May 6, 2025
+*/
+#include "MainMenu.h"
+#include "CS200/IRenderer2D.h"
+#include "CS200/NDC.h"
+#include "CS200/RenderingAPI.h"
+#include "Demo/DemoDepthPost.h"
+#include "Engine/Engine.h"
+#include "Engine/GameStateManager.h"
+#include "Engine/Input.h"
+#include "Engine/TextManager.h"
+#include "Engine/TextureManager.h"
+#include "Engine/Window.h"
+
+#include "OpenGL/Environment.h"
+
+#include "States.h"
+#include <imgui.h>
+
+// (0.0 = 0%, 1.0 = 100%)
+namespace
+{
+	// --- Menu UI Ratio ---
+	const double TITLE_X_RATIO			   = 0.15;
+	const double TITLE_Y_RATIO_FROM_BOTTOM = 0.8;
+	const double TITLE_SCALE_VAL		   = 1.5;
+
+	const double MENU_CENTER_X_RATIO	 = 0.5;
+	const double MENU_WIDTH_RATIO		 = 0.4;
+	const double MENU_ITEM_HEIGHT_RATIO	 = 0.05;
+	const double MENU_ITEM_SPACING_RATIO = 0.03;
+	const double MENU_START_Y_RATIO		 = 0.4;
+}
+
+MainMenu::MainMenu() : current_option(Option::DemoDepthPost)
+{
+}
+
+void MainMenu::DrawImGui()
+{
+	
+}
+
+void MainMenu::select_option()
+{
+	switch (current_option)
+	{
+		case MainMenu::Option::DemoDepthPost:
+			Engine::GetGameStateManager().PopState();
+			Engine::GetGameStateManager().PushState<DemoDepthPost>();
+			break;
+
+		case MainMenu::Option::Exit: Engine::GetGameStateManager().PopState(); break;
+		case MainMenu::Option::COUNT: break;
+	}
+}
+
+void MainMenu::Load()
+{
+	CS200::RenderingAPI::SetClearColor(0x000000FF);
+	if (!OpenGL::IsWebGL)
+	{
+		Engine::GetWindow().ForceResize(default_window_size.x, default_window_size.y);
+		Engine::GetWindow().SetWindowPosition(SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+	}
+	Option temp_option = current_option;
+	while (temp_option != Option::COUNT)
+	{
+		colors[temp_option] = non_seleted_color;
+		temp_option			= static_cast<Option>(static_cast<int>(temp_option) + 1);
+	}
+	update_colors();
+
+	const auto window_size = default_window_size;
+
+	title_pos.x = window_size.x * TITLE_X_RATIO;
+	title_pos.y = window_size.y * TITLE_Y_RATIO_FROM_BOTTOM;
+	title_scale = Math::vec2{ TITLE_SCALE_VAL, TITLE_SCALE_VAL };
+
+	const double text_width		  = window_size.x * MENU_WIDTH_RATIO;
+	const double text_x			  = (window_size.x * MENU_CENTER_X_RATIO) - (text_width / 2.0);
+	const double text_height	  = window_size.y * MENU_ITEM_HEIGHT_RATIO;
+	const double start_y_from_top = window_size.y * MENU_START_Y_RATIO;
+
+	const double item_bottom_y_from_top	   = start_y_from_top + text_height;
+	const double item_bottom_y_from_bottom = window_size.y - item_bottom_y_from_top;
+
+	menu_start_pos_bl	   = Math::vec2{ text_x, item_bottom_y_from_bottom };
+	menu_item_size		   = Math::vec2{ text_width, text_height };
+	menu_item_total_height = text_height + (window_size.y * MENU_ITEM_SPACING_RATIO);
+}
+
+void MainMenu::Update([[maybe_unused]] double dt)
+{
+	CS230::Input& input		  = Engine::GetInput();
+	// Math::vec2	  mouse_pos	  = input.GetMousePos();
+	// auto		  window_size = Engine::GetWindow().GetSize();
+	
+	update_colors();
+	if (input.KeyJustReleased(CS230::Input::Keys::Up))
+	{
+		int current_index = static_cast<int>(current_option);
+		int total_options = static_cast<int>(Option::COUNT);
+		current_index	  = (current_index - 1 + total_options) % total_options;
+		current_option	  = static_cast<Option>(current_index);
+	}
+	else if (input.KeyJustReleased(CS230::Input::Keys::Down))
+	{
+		int current_index = static_cast<int>(current_option);
+		int total_options = static_cast<int>(Option::COUNT);
+		current_index	  = (current_index + 1) % total_options;
+		current_option	  = static_cast<Option>(current_index);
+	}
+	else if (input.KeyJustReleased(CS230::Input::Keys::Enter))
+	{
+		select_option();
+	}
+
+
+	// bool mouse_is_hovering = false;
+	// int	 total_options	   = static_cast<int>(Option::COUNT);
+	// for (int i = 0; i < total_options; ++i)
+	// {
+	// 	double item_bottom_y = menu_start_pos_bl.y - (i * menu_item_total_height);
+
+	// 	Math::vec2 rect_pos{ menu_start_pos_bl.x, item_bottom_y };
+	// 	Math::vec2 rect_size = menu_item_size;
+
+	// 	if (IsPointInRect(mouse_pos, rect_pos, rect_size))
+	// 	{
+	// 		current_option	  = static_cast<Option>(i);
+	// 		mouse_is_hovering = true;
+	// 		break;
+	// 	}
+	// }
+
+	// if (input.MouseJustPressed(0) && mouse_is_hovering)
+	// {
+	// 	select_option();
+	// }
+
+}
+
+void MainMenu::Unload()
+{
+}
+
+void MainMenu::Draw()
+{
+	CS200::RenderingAPI::Clear();
+	auto renderer_2d = Engine::GetTextureManager().GetRenderer2D();
+	renderer_2d->BeginScene(CS200::build_ndc_matrix(Engine::GetWindow().GetSize()));
+
+	auto& text_manager = Engine::GetTextManager();
+
+	text_manager.DrawText("CS200 HW8", title_pos, Fonts::Outlined, title_scale, title_color);
+
+	double current_item_y = 0;
+	int	   i			  = 0;
+
+	// Option: demo depth post
+	i			   = static_cast<int>(Option::DemoDepthPost);
+	current_item_y = menu_start_pos_bl.y - (i * menu_item_total_height);
+	text_manager.DrawText("Demo Depth Post", Math::vec2{ menu_start_pos_bl.x, current_item_y }, Fonts::Outlined, { 1.0, 1.0 }, colors[Option::DemoDepthPost]);
+
+	// Option: exit
+	i			   = static_cast<int>(Option::Exit);
+	current_item_y = menu_start_pos_bl.y - (i * menu_item_total_height);
+	text_manager.DrawText("Exit", Math::vec2{ menu_start_pos_bl.x, current_item_y }, Fonts::Outlined, { 1.0, 1.0 }, colors[Option::Exit]);
+
+	renderer_2d->EndScene();
+}
+
+gsl::czstring MainMenu::GetName() const
+{
+	return "MainMenu";
+}
+
+void MainMenu::update_colors()
+{
+	for (auto& color : colors)
+	{
+		if (color.first == current_option)
+		{
+			color.second = seleted_color;		
+		}
+		else
+		{
+			color.second = non_seleted_color;
+		}
+	}
+}
+
+
+
+================================================
+FILE: source/Game/MainMenu.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  MainMenu.h
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    May 6, 2025
+*/
+
+#pragma once
+
+#include "../Engine/Engine.h"
+#include "../Engine/Font.h"
+#include "../Engine/GameState.h"
+#include "../Engine/Texture.h"
+
+#include "../Engine/Fonts.h"
+
+class MainMenu : public CS230::GameState
+{
+public:
+	MainMenu();
+	void						 Load() override;
+	void						 Update(double dt) override;
+	void						 Unload() override;
+	void						 Draw() override;
+	void						 DrawImGui() override;
+	gsl::czstring				 GetName() const override;
+	static constexpr CS200::RGBA title_color	   = 0x9A2EFEFF;
+	static constexpr CS200::RGBA non_seleted_color = 0xFFFFFFFF;
+	static constexpr CS200::RGBA seleted_color	   = 0x3ADF00FF;
+
+private:
+	enum class Option
+	{
+		DemoDepthPost,
+		Exit,
+		COUNT
+	};
+	Option current_option;
+
+	std::map<Option, CS200::RGBA> colors;
+
+
+	Math::vec2 title_pos;
+	Math::vec2 title_scale;
+
+	Math::vec2 menu_start_pos_bl;
+	Math::vec2 menu_item_size;
+	double	   menu_item_total_height;
+
+	void select_option();
+	void update_colors();
+
+	static constexpr Math::ivec2 default_window_size = { 800, 600 };
+};
+
+
+
+================================================
+FILE: source/Game/Particles.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Particles.h
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    May 29, 2025
+*/
+#pragma once
+#include "../Engine/Particle.h"
+
+namespace Particles
+{
+    class Smoke : public CS230::Particle
+    {
+    public:
+        Smoke() : Particle("Assets/Smoke.spt") { };
+
+        std::string TypeName() override
+        {
+            return "Smoke Particle";
+        }
+
+        static constexpr int    MaxCount = 3;
+        static constexpr double MaxLife  = 5.0;
+    };
+
+    class Hit : public CS230::Particle
+    {
+    public:
+        Hit() : Particle("Assets/Hit.spt") { };
+
+        std::string TypeName() override
+        {
+            return "Hit Particle";
+        }
+
+        static constexpr int    MaxCount = 10;
+        static constexpr double MaxLife  = 1.0;
+    };
+
+    class MeteorBit : public CS230::Particle
+    {
+    public:
+    
+        MeteorBit() : Particle("Assets/sprites/DemoSceneShowcase/Meteor.spt") { };
+
+        std::string TypeName() override
+        {
+            return "MeteorBit Particle";
+        }
+
+        static constexpr int    MaxCount = 150;
+        static constexpr double MaxLife  = 1.25;
+    };
+
+    class Tears : public CS230::Particle
+    {
+    public:
+        Tears() : Particle("Assets/sprites/CS230_Final/Tears.spt") { };
+
+        std::string TypeName() override
+        {
+            return "Tears Particle";
+        }
+
+        static constexpr int	MaxCount = 30;
+        static constexpr double MaxLife  = 3.0;
+    };
+
+    class Shining : public CS230::Particle
+    {
+    public:
+        Shining() : Particle("Assets/sprites/CS230_Final/Shining.spt") { };
+
+        std::string TypeName() override
+        {
+            return "Shining Particle";
+        }
+
+        static constexpr int    MaxCount = 50;
+        static constexpr double MaxLife  = 3.0;
+    };
+
+    class Flame : public CS230::Particle
+	{
+	public:
+		Flame() : Particle("Assets/sprites/DemoSceneShowcase/Flame.spt") { };
+
+		std::string TypeName() override
+		{
+			return "Flame Particle";
+		}
+
+		static constexpr int	MaxCount = 5;
+		static constexpr double MaxLife	 = 1.25;
+	};
+}
+
+
+
+================================================
+FILE: source/Game/Score.cpp
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Score.cpp
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    May 29, 2025
+*/
+#include "Score.h"
+
+
+Score::Score( int _value) 
+	:  value(_value){}
+
+void Score::Add(int dv)
+{
+	value += dv;
+}
+
+void Score::Sub(int dv)
+{
+    value -= dv;
+}
+
+
+
+================================================
+FILE: source/Game/Score.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Score.h
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    May 29, 2025
+*/
+#pragma once
+
+#include "../Engine/GameObject.h"
+#include "../Engine/Vec2.h"
+class Score : public CS230::Component {
+public:
+	Score(int value);
+	void Add(int dv = 1);
+    void Sub(int dv = 1);
+	const int& Value() const { return value; }
+private:
+	int value;
+};
+
+
+
+================================================
+FILE: source/Game/Splash.cpp
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Splash.cpp
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    March 12, 2025
+*/
+#include "../Engine/Engine.h"
+#include "../Engine/TextureManager.h"
+#include "../Engine/Logger.h"
+#include "../Engine/GameStateManager.h"
+#include "../Engine/Window.h"
+#include "../CS200/RenderingAPI.h"
+#include "../CS200/IRenderer2D.h"
+#include "../CS200/NDC.h"
+#include "MainMenu.h"
+#include "Splash.h"
+
+
+void Splash::Load() {
+    counter = 0.0;
+    texture = Engine::GetTextureManager().Load("Assets/images/Splash/DigiPen.png");
+}
+
+void Splash::Update([[maybe_unused]] double dt) {
+    Engine::GetLogger().LogDebug(std::to_string(counter));
+    if (counter >= 0.7) {
+        Engine::GetGameStateManager().PopState();
+        Engine::GetGameStateManager().PushState<MainMenu>();
+    }
+    counter+=dt;
+}
+
+void Splash::Unload()
+{
+}
+
+
+void Splash::Draw()  {
+
+    CS200::RenderingAPI::Clear();
+	auto renderer_2d = Engine::GetTextureManager().GetRenderer2D();
+    renderer_2d->BeginScene(CS200::build_ndc_matrix(Engine::GetWindow().GetSize()));
+    texture->Draw(Math::TranslationMatrix({ (Engine::GetWindow().GetSize() - texture->GetSize()) / 2 }));
+
+    renderer_2d->EndScene();
+}
+
+void Splash::DrawImGui()
+{
+}
+
+gsl::czstring Splash::GetName() const
+{
+    return "Splash";
+}
+
+
+
+================================================
+FILE: source/Game/Splash.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Splash.h
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    March 12, 2025
+*/
+
+#pragma once
+#include "../Engine/GameState.h"
+#include "../Engine/Texture.h"
+
+class Splash : public CS230::GameState
+{
+public:
+    // Splash();
+    void          Load() override;
+    void          Update(double dt) override;
+    void          Unload() override;
+    void          Draw() override;
+    void          DrawImGui() override;
+    gsl::czstring GetName() const override;
+
+
+private:
+    double                          counter = 0;
+    std::shared_ptr<CS230::Texture> texture;
+};
+
+
+
+================================================
+FILE: source/Game/States.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  States.h
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    March 12, 2025
+*/
+#pragma once
+enum class States {
+    Splash,
+    MainMenu,
+    Final
+};
+
+
+
+================================================
+FILE: source/OpenGL/Buffer.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Taekyung ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#include "Buffer.h"
+
+#include "GL.h"
+
+namespace OpenGL
+{
+    BufferHandle CreateBuffer(BufferType type, GLsizeiptr size_in_bytes) noexcept
+    {
+        BufferHandle new_buffer{};
+        GL::GenBuffers(1, &new_buffer);
+        GL::BindBuffer(static_cast<GLenum>(type), new_buffer);
+        GL::BufferData(static_cast<GLenum>(type), size_in_bytes, nullptr, GL_DYNAMIC_DRAW);
+        GL::BindBuffer(static_cast<GLenum>(type), 0);
+        // https://docs.gl/es3/glGenBuffers
+        // https://docs.gl/es3/glBindBuffer
+        // https://docs.gl/es3/glBufferData
+        return new_buffer;
+    }
+
+    BufferHandle CreateBuffer(BufferType type, std::span<const std::byte> static_buffer_data) noexcept
+    {
+        BufferHandle new_buffer{};
+        GL::GenBuffers(1, &new_buffer);
+        GL::BindBuffer(static_cast<GLenum>(type), new_buffer);
+        GL::BufferData(static_cast<GLenum>(type), static_cast<GLsizeiptr>(static_buffer_data.size() * sizeof(static_buffer_data[0])), static_buffer_data.data(), GL_STATIC_DRAW);
+        GL::BindBuffer(static_cast<GLenum>(type), 0);
+        // https://docs.gl/es3/glGenBuffers
+        // https://docs.gl/es3/glBindBuffer
+        // https://docs.gl/es3/glBufferData
+        return new_buffer;
+    }
+
+    void UpdateBufferData(BufferType type, BufferHandle buffer, std::span<const std::byte> data_to_copy, GLsizei starting_offset) noexcept
+    {
+        // https://docs.gl/es3/glBindBuffer
+        // https://docs.gl/es3/glBufferSubData
+        GL::BindBuffer(static_cast<GLenum>(type), buffer);
+        GL::BufferSubData(static_cast<GLenum>(type), starting_offset, static_cast<GLsizeiptr>(data_to_copy.size() * sizeof(data_to_copy[0])), data_to_copy.data());
+        GL::BindBuffer(static_cast<GLenum>(type), 0);
+    }
+}
+
+
+
+================================================
+FILE: source/OpenGL/Buffer.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+
+#include "GLConstants.h"
+#include "Handle.h"
+#include <span>
+
+namespace OpenGL
+{
+    /**
+     * \brief Descriptive alias for OpenGL buffer object handles
+     *
+     * BufferHandle provides a more specific and readable name for the generic
+     * OpenGL handle type. While it doesn't add type safety (it's still the same
+     * underlying type as other OpenGL handles), it makes the code's intent clearer
+     * by indicating that this handle specifically refers to buffer objects.
+     *
+     * This alias helps with:
+     * - Code readability: immediately clear this refers to a buffer
+     * - Documentation: function signatures clearly indicate buffer parameters
+     * - Consistency: uniform naming convention across the OpenGL wrapper
+     *
+     * Note: This is purely a naming convenience - the compiler treats BufferHandle
+     * identically to the generic Handle type, so mixing them won't cause errors.
+     * The real type safety comes from the BufferType enum and API design.
+     */
+    using BufferHandle = Handle;
+
+    /**
+     * \brief Enumeration of OpenGL buffer types for different rendering purposes
+     *
+     * BufferType categorizes buffers based on their intended use in the graphics
+     * pipeline. Each type corresponds to a specific OpenGL buffer target that
+     * determines how the GPU will access and use the buffer data.
+     *
+     * The enum values map directly to OpenGL constants but provide a more
+     * type-safe and readable interface. This helps prevent binding buffers
+     * to incorrect targets and makes the code's intent clearer.
+     *
+     * Buffer Types:
+     * - Vertices: Stores vertex attribute data (positions, colors, texture coordinates)
+     * - Indices: Stores element indices for indexed drawing operations
+     * - UniformBlocks: Stores uniform data shared across multiple shader invocations
+     */
+    enum class BufferType : GLenum
+    {
+        Vertices      = GL_ARRAY_BUFFER,         ///< Vertex attribute data buffer
+        Indices       = GL_ELEMENT_ARRAY_BUFFER, ///< Element index buffer for indexed drawing
+        UniformBlocks = GL_UNIFORM_BUFFER        ///< Uniform block data buffer
+    };
+    /**
+     * \brief Create an empty buffer with specified size for dynamic data
+     * \param type The type of buffer to create (Vertices, Indices, or UniformBlocks)
+     * \param size_in_bytes Size of the buffer in bytes
+     * \return Handle to the newly created buffer object
+     *
+     * Creates an OpenGL buffer object with allocated storage but no initial data.
+     * This is optimal for buffers that will be updated frequently during runtime,
+     * such as dynamic vertex data, animated geometry, or per-frame uniform data.
+     *
+     * The buffer is configured for dynamic usage patterns, making it suitable for:
+     * - Vertex data that changes every frame (particle systems, UI elements)
+     * - Temporary geometry that gets rebuilt frequently
+     * - Buffers that will be updated with new data using UpdateBufferData()
+     *
+     * Memory allocation happens on the GPU, but no data transfer occurs during
+     * creation. The buffer contents are undefined until data is uploaded.
+     *
+     * The implementation uses GL_DYNAMIC_DRAW usage hint, indicating that the
+     * buffer contents will be modified repeatedly and used for drawing operations.
+     */
+    [[nodiscard]] BufferHandle CreateBuffer(BufferType type, GLsizeiptr size_in_bytes) noexcept;
+
+    /**
+     * \brief Create a buffer initialized with static data
+     * \param type The type of buffer to create (Vertices, Indices, or UniformBlocks)
+     * \param static_buffer_data Span containing the initial data to upload
+     * \return Handle to the newly created buffer object
+     *
+     * Creates an OpenGL buffer object and immediately uploads the provided data.
+     * This is optimal for buffers containing static data that won't change during
+     * the application's lifetime, such as fixed mesh geometry, constant lookup
+     * tables, or unchanging uniform block data.
+     *
+     * The buffer is configured for static usage patterns, making it suitable for:
+     * - Static mesh geometry (terrain, buildings, fixed models)
+     * - Constant index arrays for standard shapes (quads, cubes)
+     * - Lookup tables and constant uniform data
+     * - Any data that remains unchanged after initial upload
+     *
+     * Memory allocation and data transfer happen atomically during creation,
+     * ensuring the buffer is immediately ready for use in rendering operations.
+     *
+     * The implementation uses GL_STATIC_DRAW usage hint, indicating that the
+     * buffer contents will be set once and used repeatedly for drawing.
+     */
+    [[nodiscard]] BufferHandle CreateBuffer(BufferType type, std::span<const std::byte> static_buffer_data) noexcept;
+
+    /**
+     * \brief Update existing buffer with new data
+     * \param type The type of buffer being updated
+     * \param buffer Handle to the buffer object to update
+     * \param data_to_copy Span containing the new data to upload
+     * \param starting_offset Byte offset within the buffer where copying begins (default: 0)
+     *
+     * Uploads new data to an existing buffer object, either replacing all contents
+     * or updating a specific region. This is essential for dynamic buffers that
+     * need frequent updates, such as animated vertex data, changing uniform values,
+     * or streaming geometry data.
+     *
+     * The function provides flexibility for partial updates:
+     * - Full buffer replacement: starting_offset = 0, data spans entire buffer
+     * - Partial updates: starting_offset > 0, data spans subset of buffer
+     * - Streaming updates: sequential calls with different offsets
+     *
+     * Common usage patterns:
+     * - Updating vertex positions for animated objects
+     * - Streaming new geometry data for dynamic scenes
+     * - Modifying uniform block data for per-object parameters
+     * - Updating index buffers for dynamic mesh topology
+     *
+     * The buffer must have sufficient capacity to hold the new data starting
+     * from the specified offset. The function performs efficient GPU memory
+     * transfers using OpenGL's buffer sub-data operations.
+     */
+    void UpdateBufferData(BufferType type, BufferHandle buffer, std::span<const std::byte> data_to_copy, GLsizei starting_offset = 0) noexcept;
+}
+
+
+
+================================================
+FILE: source/OpenGL/Environment.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+
+namespace OpenGL
+{
+    inline int MajorVersion         = 0;
+    inline int MinorVersion         = 0;
+    inline int MaxTextureImageUnits = 2;
+    inline int MaxTextureSize       = 64;
+
+    constexpr int version(int major, int minor) noexcept
+    {
+        return major * 100 + minor * 10;
+    }
+
+    inline int current_version() noexcept
+    {
+        return version(MajorVersion, MinorVersion);
+    }
+
+#if defined(IS_WEBGL2)
+    constexpr bool IsWebGL                     = true;
+    // WEBGL2 is expressed as 3.0 ES
+    constexpr int  MinimumRequiredMajorVersion = 3;
+    constexpr int  MinimumRequiredMinorVersion = 0;
+#else
+    constexpr bool IsWebGL                     = false;
+    constexpr int  MinimumRequiredMajorVersion = 3;
+    constexpr int  MinimumRequiredMinorVersion = 3;
+#endif
+}
+
+
+
+================================================
+FILE: source/OpenGL/Framebuffer.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#include "Framebuffer.h"
+#include "Engine/Engine.h"
+#include "Engine/Logger.h"
+#include "GL.h"
+#include "Texture.h"
+
+namespace
+{
+    void verify_framebuffer_complete(OpenGL::FramebufferHandle framebuffer);
+}
+
+namespace OpenGL
+{
+    FramebufferWithColor CreateFramebufferWithColor(Math::ivec2 size)
+    {
+        FramebufferWithColor fb{};
+        //  * - A color texture attachment in RGBA format for storing rendered pixels
+        fb.ColorAttachment = CreateRGBATexture(size);
+        GL::GenFramebuffers(1,&(fb.Framebuffer));
+        GL::BindFramebuffer(GL_FRAMEBUFFER, fb.Framebuffer);
+        GL::FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,fb.ColorAttachment, 0);
+        //  * - Proper draw buffer configuration for color output
+        constexpr GLenum draw_buffers[] = { GL_COLOR_ATTACHMENT0 };
+        GL::DrawBuffers(1, draw_buffers);
+        //  * - Complete framebuffer validation to ensure it's ready for use
+        verify_framebuffer_complete(fb.Framebuffer);
+        return fb;
+    }
+
+    void DestroyFramebufferWithColor(FramebufferWithColor& framebuffer_with_color) noexcept
+    {
+        GL::DeleteTextures(1, &framebuffer_with_color.ColorAttachment), framebuffer_with_color.ColorAttachment = 0;
+		GL::DeleteFramebuffers(1, &framebuffer_with_color.Framebuffer), framebuffer_with_color.Framebuffer	   = 0;
+    }
+}
+
+namespace
+{
+    void verify_framebuffer_complete(OpenGL::FramebufferHandle framebuffer)
+    {
+        GL::BindFramebuffer(GL_FRAMEBUFFER,framebuffer);
+        const auto status_result = GL::CheckFramebufferStatus(GL_FRAMEBUFFER);
+        if (status_result == GL_FRAMEBUFFER_COMPLETE)
+        {
+            GL::BindFramebuffer(GL_FRAMEBUFFER, 0);
+            return; // Framebuffer is complete and ready to use
+        }
+
+        std::ostringstream message;
+        message << "Framebuffer creation failed: status = 0x" << std::hex << status_result << std::dec << "\n";
+
+        switch (status_result)
+        {
+            case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT:
+                message << "\t[Attachment Error] One or more framebuffer attachments (e.g. textures or renderbuffers) are incomplete or incompatible.\n"
+                        << "\t-> Double-check format consistency and ensure all attached resources are properly initialized.\n";
+                break;
+
+            case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT:
+                message << "\t[Missing Attachment] No color, depth, or stencil attachment was provided.\n"
+                        << "\t-> Make sure at least one valid image is attached using glFramebufferTexture or glFramebufferRenderbuffer.\n";
+                break;
+
+            case GL_FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER:
+                message << "\t[Draw Buffer Error] Draw buffers are referencing attachments that don't exist or are incomplete.\n"
+                        << "\t-> Confirm that GL_COLOR_ATTACHMENTx exists for each buffer in GL::DrawBuffers().\n";
+                break;
+
+            case GL_FRAMEBUFFER_INCOMPLETE_READ_BUFFER:
+                message << "\t[Read Buffer Error] Read buffer (glReadBuffer) is referencing an incomplete or missing attachment.\n"
+                        << "\t-> Check if glReadBuffer is targeting an attachment that's properly set up.\n";
+                break;
+
+            case GL_FRAMEBUFFER_UNSUPPORTED:
+                message << "\t[Unsupported Configuration] This framebuffer configuration is not supported by the OpenGL implementation.\n"
+                        << "\t-> Try simplifying formats, avoid non-standard combinations, and confirm hardware support.\n";
+                break;
+
+            default:
+                message << "\t[Unknown Error] Framebuffer status not recognized. Raw code: " << status_result << "\n"
+                        << "\t-> Investigate texture formats and attachment completeness. Enable OpenGL debug output for deeper insights.\n";
+                break;
+        }
+
+        Engine::GetLogger().LogError(message.str());
+        GL::BindFramebuffer(GL_FRAMEBUFFER, 0);
+        throw std::runtime_error{ message.str() };
+    }
+}
+
+
+
+================================================
+FILE: source/OpenGL/Framebuffer.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+
+#include "Engine/Vec2.h"
+#include "Handle.h"
+#include "Texture.h"
+
+namespace OpenGL
+{
+    /**
+     * \brief Descriptive alias for OpenGL framebuffer object handles
+     *
+     * FramebufferHandle provides a more specific and readable name for the generic
+     * OpenGL handle type when referring to framebuffer objects. Like other handle
+     * aliases, this improves code clarity without adding compile-time type safety.
+     */
+    using FramebufferHandle = Handle;
+
+    /**
+     * \brief Complete framebuffer setup with color attachment for render-to-texture operations
+     *
+     * FramebufferWithColor represents a fully configured OpenGL framebuffer that can
+     * be used as a render target. This struct bundles together the framebuffer object
+     * and its associated color texture, providing everything needed for off-screen
+     * rendering or render-to-texture effects.
+     *
+     * Purpose and Use Cases:
+     * - Render-to-texture operations (post-processing effects, shadows, reflections)
+     * - Off-screen rendering for UI elements or HUD components
+     * - Multi-pass rendering techniques (deferred rendering, G-buffers)
+     * - Creating texture atlases or procedural textures at runtime
+     * - Screen capture and screenshot functionality
+     *
+     * The framebuffer acts as a rendering target that redirects all drawing operations
+     * to the attached texture instead of the screen. This enables sophisticated
+     * graphics techniques where the rendered result becomes input for subsequent
+     * rendering passes or post-processing effects.
+     *
+     * Resource Management:
+     * Both the framebuffer and its color texture must be properly destroyed when
+     * no longer needed to prevent OpenGL resource leaks. The struct design makes
+     * it easy to manage these related resources as a single unit.
+     */
+    struct [[nodiscard]] FramebufferWithColor
+    {
+        /** \brief Handle to the OpenGL framebuffer object */
+        FramebufferHandle Framebuffer = 0;
+
+        /** \brief Handle to the color texture attached to this framebuffer */
+        TextureHandle ColorAttachment = 0;
+    };
+
+    /**
+     * \brief Create a complete framebuffer with color texture attachment
+     * \param size Dimensions of the framebuffer and its color texture in pixels
+     * \return Fully configured framebuffer ready for rendering operations
+     *
+     * Creates a complete framebuffer setup suitable for render-to-texture operations.
+     * This function handles all the complex OpenGL setup required for off-screen
+     * rendering, including texture creation, framebuffer configuration, and
+     * attachment binding.
+     *
+     * The created framebuffer includes:
+     * - A color texture attachment in RGBA format for storing rendered pixels
+     * - Proper draw buffer configuration for color output
+     * - Complete framebuffer validation to ensure it's ready for use
+     *
+     * Common usage patterns:
+     * - Post-processing pipelines: render scene to texture, then apply effects
+     * - Shadow mapping: render depth information from light's perspective
+     * - Reflection/refraction: capture environment from different viewpoints
+     * - UI rendering: create interface elements as textures
+     *
+     * The implementation creates an RGBA texture matching the specified dimensions
+     * and attaches it as GL_COLOR_ATTACHMENT0. The framebuffer is validated for
+     * completeness before being returned, throwing an exception if setup fails.
+     *
+     * Memory considerations:
+     * The texture size directly affects GPU memory usage (width 횞 height 횞 4 bytes
+     * for RGBA). Large framebuffers can impact performance and memory consumption.
+     */
+    FramebufferWithColor CreateFramebufferWithColor(Math::ivec2 size);
+
+    /**
+     * \brief Safely destroy framebuffer and release all associated resources
+     * \param framebuffer_with_color Framebuffer structure to destroy (will be reset to zero)
+     *
+     * Properly cleans up both the framebuffer object and its associated color texture,
+     * preventing OpenGL resource leaks. This function ensures that all GPU resources
+     * are returned to the system and the structure is reset to a safe state.
+     *
+     * Resource cleanup includes:
+     * - Deleting the OpenGL framebuffer object
+     * - Deleting the associated color texture
+     * - Resetting both handles to zero for safety
+     *
+     * The function is designed to be safe to call multiple times on the same
+     * structure, as it resets handles to zero after deletion. This prevents
+     * double-deletion errors that could occur with manual resource management.
+     *
+     * Usage patterns:
+     * - Call when framebuffer is no longer needed
+     * - Include in cleanup/shutdown code
+     * - Use in RAII wrapper destructors for automatic cleanup
+     * - Call before reassigning framebuffer variables
+     *
+     * After calling this function, the framebuffer structure should not be used
+     * for rendering operations until a new framebuffer is created.
+     */
+    void DestroyFramebufferWithColor(FramebufferWithColor& framebuffer_with_color) noexcept;
+}
+
+
+

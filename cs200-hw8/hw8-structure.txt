@@ -1,0 +1,178 @@
+Directory: cs200-hw8
+Files analyzed: 151
+
+Estimated tokens: 340.4k
+Directory structure:
+└── cs200-hw8/
+    ├── README.md
+    ├── CMakeLists.txt
+    ├── CMakePresets.json
+    ├── hw8.txt
+    ├── split_ingest.py
+    ├── .clang-format
+    ├── app_resources/
+    │   └── web/
+    │       └── index_shell.html
+    ├── Assets/
+    │   └── shaders/
+    │       ├── basic_vtx_clr_attribute.frag
+    │       ├── pass_thru_pos2d_clr.vert
+    │       ├── BatchRenderer2D/
+    │       │   ├── quad.frag
+    │       │   ├── quad.vert
+    │       │   ├── sdf.frag
+    │       │   └── sdf.vert
+    │       ├── DemoBufferTypes/
+    │       │   ├── background.frag
+    │       │   ├── background.vert
+    │       │   ├── villager.frag
+    │       │   └── villager.vert
+    │       ├── DemoTexturing/
+    │       │   ├── combine.frag
+    │       │   └── combine.vert
+    │       ├── ImmediateRenderer2D/
+    │       │   ├── quad.frag
+    │       │   ├── quad.vert
+    │       │   ├── sdf.frag
+    │       │   └── sdf.vert
+    │       ├── InstancedRenderer2D/
+    │       │   ├── quad.frag
+    │       │   ├── quad.vert
+    │       │   ├── sdf.frag
+    │       │   └── sdf.vert
+    │       ├── PostProcess/
+    │       │   ├── box-blur.frag
+    │       │   ├── chromatic-aberration.frag
+    │       │   ├── gamma-correct.frag
+    │       │   ├── pixelize.frag
+    │       │   ├── simple-texture.frag
+    │       │   └── simple.vert
+    │       └── shape/
+    │           ├── shape.frag
+    │           └── shape.vert
+    ├── cmake/
+    │   ├── CompilerWarnings.cmake
+    │   ├── Dependencies.cmake
+    │   ├── StandardProjectSettings.cmake
+    │   └── dependencies/
+    │       ├── DearImGUI.cmake
+    │       ├── GLEW.cmake
+    │       ├── GSL.cmake
+    │       ├── OpenGL.cmake
+    │       ├── SDL2.cmake
+    │       └── STB.cmake
+    ├── docs/
+    │   ├── DebuggingWeb.md
+    │   └── DevEnvironment.md
+    ├── scripts/
+    │   └── scan_build_project.py
+    └── source/
+        ├── CMakeLists.txt
+        ├── main.cpp
+        ├── CS200/
+        │   ├── BatchRenderer2D.cpp
+        │   ├── BatchRenderer2D.h
+        │   ├── Image.cpp
+        │   ├── Image.h
+        │   ├── ImGuiHelper.cpp
+        │   ├── ImGuiHelper.h
+        │   ├── ImmediateRenderer2D.cpp
+        │   ├── ImmediateRenderer2D.h
+        │   ├── InstancedRenderer2D.cpp
+        │   ├── InstancedRenderer2D.h
+        │   ├── IRenderer2D.h
+        │   ├── NDC.h
+        │   ├── OffscreenFramebuffer.cpp
+        │   ├── OffscreenFramebuffer.h
+        │   ├── PostProcessingPipeline.cpp
+        │   ├── PostProcessingPipeline.h
+        │   ├── Renderer2DUtils.cpp
+        │   ├── Renderer2DUtils.h
+        │   ├── RenderingAPI.cpp
+        │   ├── RenderingAPI.h
+        │   ├── RGBA.h
+        │   ├── Shape.cpp
+        │   └── Shape.h
+        ├── Demo/
+        │   ├── DemoDepthPost.cpp
+        │   └── DemoDepthPost.h
+        ├── Engine/
+        │   ├── Animation.cpp
+        │   ├── Animation.h
+        │   ├── Camera.cpp
+        │   ├── Camera.h
+        │   ├── Collision.cpp
+        │   ├── Collision.h
+        │   ├── Component.h
+        │   ├── ComponentManager.h
+        │   ├── Engine.cpp
+        │   ├── Engine.h
+        │   ├── Error.h
+        │   ├── Font.cpp
+        │   ├── Font.h
+        │   ├── Fonts.h
+        │   ├── FPS.h
+        │   ├── GameObject.cpp
+        │   ├── GameObject.h
+        │   ├── GameObjectManager.cpp
+        │   ├── GameObjectManager.h
+        │   ├── GameState.h
+        │   ├── GameStateManager.cpp
+        │   ├── GameStateManager.h
+        │   ├── Input.cpp
+        │   ├── Input.h
+        │   ├── Logger.cpp
+        │   ├── Logger.h
+        │   ├── Matrix.cpp
+        │   ├── Matrix.h
+        │   ├── Particle.cpp
+        │   ├── Particle.h
+        │   ├── Path.cpp
+        │   ├── Path.h
+        │   ├── Random.cpp
+        │   ├── Random.h
+        │   ├── Rect.h
+        │   ├── ShowCollision.cpp
+        │   ├── ShowCollision.h
+        │   ├── Sprite.cpp
+        │   ├── Sprite.h
+        │   ├── TextManager.cpp
+        │   ├── TextManager.h
+        │   ├── Texture.cpp
+        │   ├── Texture.h
+        │   ├── TextureManager.cpp
+        │   ├── TextureManager.h
+        │   ├── Timer.h
+        │   ├── Vec2.cpp
+        │   ├── Vec2.h
+        │   ├── Window.cpp
+        │   └── Window.h
+        ├── Game/
+        │   ├── Background.cpp
+        │   ├── Background.h
+        │   ├── GameObjectTypes.h
+        │   ├── MainMenu.cpp
+        │   ├── MainMenu.h
+        │   ├── Particles.h
+        │   ├── Score.cpp
+        │   ├── Score.h
+        │   ├── Splash.cpp
+        │   ├── Splash.h
+        │   └── States.h
+        └── OpenGL/
+            ├── Buffer.cpp
+            ├── Buffer.h
+            ├── Environment.h
+            ├── Framebuffer.cpp
+            ├── Framebuffer.h
+            ├── GL.cpp
+            ├── GL.h
+            ├── GLConstants.h
+            ├── GLTypes.h
+            ├── Handle.h
+            ├── Shader.cpp
+            ├── Shader.h
+            ├── Texture.cpp
+            ├── Texture.h
+            ├── VertexArray.cpp
+            └── VertexArray.h

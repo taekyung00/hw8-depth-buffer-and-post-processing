@@ -1,0 +1,1291 @@
+================================================
+FILE: source/OpenGL/Shader.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#include "Shader.h"
+
+#include "Engine/Engine.h"
+#include "Engine/Logger.h"
+#include "Engine/Path.h"
+#include "GL.h"
+#include <algorithm>
+
+namespace
+{
+    void                                                 print_glsl_text(std::string_view source);
+    [[nodiscard]] OpenGL::Handle                         compile_shader_source(GLenum type, std::string_view glsl_text);
+    [[nodiscard]] OpenGL::Handle                         compile_shader_file(GLenum type, const std::filesystem::path& file_path);
+    [[nodiscard]] OpenGL::ShaderHandle                   link_shader_program(OpenGL::Handle vertex_handle, OpenGL::Handle fragment_handle);
+    [[nodiscard]] std::unordered_map<std::string, GLint> get_uniform_locations(OpenGL::ShaderHandle shader);
+}
+
+namespace OpenGL
+{
+    CompiledShader CreateShader(std::filesystem::path vertex_filepath, std::filesystem::path fragment_filepath)
+    {
+        const auto     vertex_handle   = compile_shader_file(GL_VERTEX_SHADER, vertex_filepath);
+        const auto     fragment_handle = compile_shader_file(GL_FRAGMENT_SHADER, fragment_filepath);
+        CompiledShader cs{};
+        cs.Shader           = link_shader_program(vertex_handle, fragment_handle);
+        cs.UniformLocations = get_uniform_locations(cs.Shader);
+        return cs;
+    }
+
+    CompiledShader CreateShader(std::string_view vertex_source, std::string_view fragment_source)
+    {
+        const auto     vertex_handle   = compile_shader_source(GL_VERTEX_SHADER, vertex_source);
+        const auto     fragment_handle = compile_shader_source(GL_FRAGMENT_SHADER, fragment_source);
+        CompiledShader cs{};
+        cs.Shader           = link_shader_program(vertex_handle, fragment_handle);
+        cs.UniformLocations = get_uniform_locations(cs.Shader);
+        return cs;
+    }
+
+    void DestroyShader(CompiledShader& shader) noexcept
+    {
+        GL::DeleteProgram(shader.Shader);
+        shader.Shader = 0;
+
+        shader.UniformLocations.clear();
+    }
+
+    void BindUniformBufferToShader(ShaderHandle shader_handle, GLuint binding_number, Handle uniform_bufer, std::string_view uniform_block_name)
+    {
+        const auto block_index = GL::GetUniformBlockIndex(shader_handle, uniform_block_name.data());
+        if (block_index != GL_INVALID_INDEX)
+        {
+            GL::UniformBlockBinding(shader_handle, block_index, binding_number);
+            GL::BindBufferBase(GL_UNIFORM_BUFFER, binding_number, uniform_bufer);
+        }
+        else
+        {
+            Engine::GetLogger().LogError("Uniform block '" + std::string(uniform_block_name) + "' not found in shader.");
+        }
+    }
+}
+
+namespace
+{
+    void print_glsl_text(std::string_view source)
+    {
+        using CountInt                          = decltype(std::count(source.begin(), source.end(), '\n'));
+        CountInt           num_lines            = std::count(source.begin(), source.end(), '\n');
+        const int          max_linenumber_width = static_cast<int>(std::to_string(num_lines).size());
+        CountInt           line_number          = 1;
+        std::string        line;
+        std::ostringstream sout;
+        std::istringstream source_stream(source.data());
+        while (std::getline(source_stream, line))
+        {
+            sout << std::setw(max_linenumber_width) << std::right << line_number << "| " << line << '\n';
+            ++line_number;
+        }
+        Engine::GetLogger().LogVerbose(sout.str());
+    }
+
+    OpenGL::Handle compile_shader_source(GLenum type, std::string_view glsl_text)
+    {
+        OpenGL::Handle shader = GL::CreateShader(type);
+        GLchar const*  source[]{ glsl_text.data() };
+        GL::ShaderSource(shader, 1, source, nullptr);
+        GL::CompileShader(shader);
+        GLint is_compiled = 0;
+        GL::GetShaderiv(shader, GL_COMPILE_STATUS, &is_compiled);
+        if (is_compiled == GL_FALSE)
+        {
+            GLint log_length = 0;
+            GL::GetShaderiv(shader, GL_INFO_LOG_LENGTH, &log_length);
+            std::string error_log;
+            error_log.resize(static_cast<std::string::size_type>(log_length) + 1);
+            GL::GetShaderInfoLog(shader, log_length, nullptr, error_log.data());
+            GL::DeleteShader(shader);
+            shader = 0;
+            Engine::GetLogger().LogError(error_log);
+            print_glsl_text(glsl_text);
+            throw std::runtime_error(error_log);
+        }
+        return shader;
+    }
+
+    OpenGL::Handle compile_shader_file(GLenum type, const std::filesystem::path& file_path)
+    {
+        const auto    shader_file_path = assets::locate_asset(file_path);
+        std::ifstream ifs(shader_file_path, std::ios::in);
+        if (!ifs)
+        {
+            Engine::GetLogger().LogError("Cannot open " + file_path.string());
+            return 0;
+        }
+        std::string glsl_text;
+        glsl_text.reserve(gsl::narrow<std::size_t>(std::filesystem::file_size(shader_file_path)));
+        std::copy((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>(), std::back_insert_iterator(glsl_text));
+        return compile_shader_source(type, std::string_view(glsl_text));
+    }
+
+    OpenGL::ShaderHandle link_shader_program(OpenGL::Handle vertex_handle, OpenGL::Handle fragment_handle)
+    {
+        OpenGL::ShaderHandle program_handle = GL::CreateProgram();
+        if (program_handle == 0)
+        {
+            throw std::runtime_error("Unable to create program\n");
+        }
+
+        GL::AttachShader(program_handle, vertex_handle);
+        GL::AttachShader(program_handle, fragment_handle);
+
+        GL::LinkProgram(program_handle);
+
+        GL::DeleteShader(vertex_handle);
+        GL::DeleteShader(fragment_handle);
+
+        GLint is_linked = 0;
+        GL::GetProgramiv(program_handle, GL_LINK_STATUS, &is_linked);
+        if (is_linked == GL_FALSE)
+        {
+            GLint log_length = 0;
+            GL::GetProgramiv(program_handle, GL_INFO_LOG_LENGTH, &log_length);
+            std::string error;
+            error.resize(static_cast<unsigned>(log_length) + 1);
+            GL::GetProgramInfoLog(program_handle, log_length, nullptr, error.data());
+            Engine::GetLogger().LogError(error);
+            throw std::runtime_error(error);
+        }
+        return program_handle;
+    }
+
+    std::unordered_map<std::string, GLint> get_uniform_locations(OpenGL::ShaderHandle shader)
+    {
+        std::unordered_map<std::string, GLint> uniform_locations;
+        GLint                                  num_uniforms = 0;
+        GL::GetProgramiv(shader, GL_ACTIVE_UNIFORMS, &num_uniforms);
+        if (num_uniforms <= 0)
+        {
+            return uniform_locations;
+        }
+        GLint max_name_length = 0;
+        GL::GetProgramiv(shader, GL_ACTIVE_UNIFORM_MAX_LENGTH, &max_name_length);
+        uniform_locations.reserve(static_cast<std::size_t>(num_uniforms));
+        std::string uniform_name;
+        uniform_name.resize(static_cast<std::size_t>(max_name_length));
+
+        for (GLint i = 0; i < num_uniforms; ++i)
+        {
+            GLsizei length = 0;
+            GLint   size   = 0;
+            GLenum  type   = 0;
+            GL::GetActiveUniform(shader, static_cast<GLuint>(i), max_name_length, &length, &size, &type, uniform_name.data());
+            uniform_name.resize(static_cast<std::size_t>(length));
+            GLint location = GL::GetUniformLocation(shader, uniform_name.c_str());
+            if (location != -1)
+            {
+                uniform_locations[uniform_name] = location;
+            }
+            uniform_name.resize(static_cast<std::size_t>(max_name_length));
+        }
+        return uniform_locations;
+    }
+}
+
+
+
+================================================
+FILE: source/OpenGL/Shader.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+
+#include "Handle.h"
+#include <filesystem>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+
+namespace OpenGL
+{
+    /**
+     * \brief Descriptive alias for OpenGL shader program handles
+     *
+     * ShaderHandle provides a more specific and readable name for the generic
+     * OpenGL handle type when referring to compiled shader programs. This improves
+     * code clarity without adding compile-time type safety.
+     */
+    using ShaderHandle = Handle;
+
+    /**
+     * \brief Complete shader program with uniform location cache for efficient rendering
+     *
+     * CompiledShader represents a fully compiled and linked OpenGL shader program
+     * that's ready for use in rendering operations. This struct bundles the shader
+     * program handle with a pre-computed cache of uniform locations, eliminating
+     * the need for expensive uniform location lookups during rendering.
+     *
+     * Purpose and Benefits:
+     * - Encapsulates the complete shader compilation and linking process
+     * - Provides efficient uniform access through cached locations
+     * - Simplifies shader resource management
+     * - Reduces runtime overhead by avoiding repeated OpenGL queries
+     *
+     * The uniform location cache is particularly important for performance, as
+     * calling GL::GetUniformLocation() during rendering can be expensive. By
+     * pre-computing and storing these locations, uniform updates become much
+     * faster during the render loop.
+     *
+     * Typical shader workflow:
+     * 1. Create shader from vertex and fragment sources
+     * 2. Use cached uniform locations for fast parameter updates
+     * 3. Bind shader program for rendering operations
+     * 4. Destroy shader when no longer needed
+     *
+     * Resource management:
+     * Both the shader program and uniform location cache should be properly
+     * cleaned up when the shader is no longer needed to prevent resource leaks.
+     */
+    struct [[nodiscard]] CompiledShader
+    {
+        /** \brief Handle to the compiled and linked OpenGL shader program */
+        ShaderHandle Shader;
+
+        /** \brief Cache of uniform names mapped to their OpenGL locations for fast access */
+        std::unordered_map<std::string, GLint> UniformLocations;
+    };
+
+    /**
+     * \brief Create shader program from vertex and fragment shader files
+     * \param vertex_filepath Path to the vertex shader source file (.vert)
+     * \param fragment_filepath Path to the fragment shader source file (.frag)
+     * \return Fully compiled shader program with cached uniform locations
+     *
+     * Loads, compiles, and links a complete shader program from separate vertex
+     * and fragment shader files. This is the standard approach for shader
+     * development, allowing separate editing and version control of vertex
+     * and fragment shader code.
+     *
+     * The compilation process includes:
+     * - Loading shader source code from the specified files
+     * - Compiling vertex and fragment shaders separately
+     * - Linking both shaders into a complete program
+     * - Extracting and caching all uniform locations for fast access
+     * - Cleaning up intermediate shader objects
+     *
+     * Error handling and debugging:
+     * If compilation or linking fails, detailed error messages are logged with
+     * line numbers to help identify the problematic shader code. The function
+     * throws exceptions for compilation errors, making shader loading failures
+     * immediately apparent.
+     *
+     * File organization patterns:
+     * - Vertex shaders typically have .vert extension
+     * - Fragment shaders typically have .frag extension
+     * - Shaders are located through the asset system for proper path resolution
+     *
+     * This approach is ideal for production code where shaders are stored as
+     * separate files and can be modified without recompiling the application.
+     */
+    CompiledShader CreateShader(std::filesystem::path vertex_filepath, std::filesystem::path fragment_filepath);
+
+    /**
+     * \brief Create shader program from vertex and fragment shader source strings
+     * \param vertex_source Complete GLSL source code for the vertex shader
+     * \param fragment_source Complete GLSL source code for the fragment shader
+     * \return Fully compiled shader program with cached uniform locations
+     *
+     * Compiles and links a complete shader program directly from source code
+     * strings. This approach is useful for programmatically generated shaders,
+     * embedded shader code, or when shader sources are loaded through custom
+     * mechanisms rather than direct file access.
+     *
+     * The compilation process mirrors the file-based version:
+     * - Compiling vertex and fragment shaders from provided strings
+     * - Linking both shaders into a complete program
+     * - Extracting and caching all uniform locations
+     * - Proper cleanup of intermediate resources
+     *
+     * Use cases:
+     * - Procedurally generated shaders with variable content
+     * - Embedded shaders compiled into the executable
+     * - Shader templates with runtime string substitution
+     * - Loading shaders from compressed archives or custom formats
+     * - Shader preprocessing and macro expansion
+     *
+     * Error handling:
+     * Like the file-based version, compilation errors result in detailed logging
+     * with line numbers and exception throwing for immediate failure detection.
+     *
+     * This approach provides maximum flexibility for dynamic shader generation
+     * while maintaining the same performance characteristics as file-based shaders.
+     */
+    CompiledShader CreateShader(std::string_view vertex_source, std::string_view fragment_source);
+
+    /**
+     * \brief Safely destroy shader program and release all associated resources
+     * \param shader Compiled shader structure to destroy (will be reset to safe state)
+     *
+     * Properly cleans up the OpenGL shader program and clears the uniform location
+     * cache, preventing resource leaks and ensuring the structure is in a safe
+     * state for reuse or destruction.
+     *
+     * Resource cleanup includes:
+     * - Deleting the OpenGL shader program object
+     * - Clearing the uniform location cache
+     * - Resetting the shader handle to zero for safety
+     *
+     * The function is designed to be safe for multiple calls on the same shader
+     * structure, as it resets handles after deletion. This prevents double-deletion
+     * errors and makes the function suitable for use in destructors or cleanup code.
+     *
+     * Usage patterns:
+     * - Call when shader is no longer needed
+     * - Include in application shutdown sequences
+     * - Use in RAII wrapper destructors for automatic cleanup
+     * - Call before reassigning shader variables
+     *
+     * After calling this function, the shader structure should not be used for
+     * rendering operations until a new shader program is created and assigned.
+     */
+    void DestroyShader(CompiledShader& shader) noexcept;
+
+    /**
+     * \brief Bind uniform buffer to shader's uniform block for shared data access
+     * \param shader_handle Handle to the shader program
+     * \param binding_number Binding point index for the uniform buffer
+     * \param uniform_bufer Handle to the uniform buffer object
+     * \param uniform_block_name Name of the uniform block in the shader
+     *
+     * Establishes a connection between a uniform buffer object and a named uniform
+     * block in the shader program. This enables efficient sharing of uniform data
+     * across multiple shader programs and reduces the overhead of individual
+     * uniform updates.
+     *
+     * Uniform buffer benefits:
+     * - Share common data (matrices, lighting parameters) across multiple shaders
+     * - Reduce driver overhead compared to individual uniform calls
+     * - Enable more efficient uniform updates for large data sets
+     * - Provide better organization of related uniform variables
+     *
+     * The binding process:
+     * - Locates the named uniform block within the shader program
+     * - Assigns the block to the specified binding point
+     * - Binds the uniform buffer to the same binding point
+     * - Logs errors if the uniform block is not found
+     *
+     * Common uniform block uses:
+     * - Camera matrices (view, projection, view-projection)
+     * - Lighting parameters (light positions, colors, attenuation)
+     * - Material properties shared across multiple objects
+     * - Time-based values for animations and effects
+     *
+     * The binding number should be consistent across all shaders that need to
+     * access the same uniform buffer data, enabling true data sharing.
+     */
+    void BindUniformBufferToShader(ShaderHandle shader_handle, GLuint binding_number, Handle uniform_bufer, std::string_view uniform_block_name);
+}
+
+
+
+================================================
+FILE: source/OpenGL/Texture.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#include "Texture.h"
+#include "CS200/Image.h"
+#include "Environment.h"
+#include "GL.h"
+
+namespace OpenGL
+{
+    TextureHandle CreateTextureFromImage(const CS200::Image& image, Filtering filtering, Wrapping wrapping) noexcept
+    {
+        Math::ivec2 image_size = image.GetSize();
+        return CreateTextureFromMemory(image_size, { image.data(), static_cast<size_t>(image_size.x * image_size.y) }, filtering, wrapping);
+    }
+
+    TextureHandle CreateTextureFromMemory(Math::ivec2 size, std::span<const CS200::RGBA> colors, Filtering filtering, Wrapping wrapping) noexcept
+    {
+        TextureHandle texture{};
+        GL::GenTextures(1, &texture);
+        GL::BindTexture(GL_TEXTURE_2D, texture);
+        GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, static_cast<GLint>(filtering));
+        GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, static_cast<GLint>(filtering));
+
+        GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, static_cast<GLint>(wrapping));
+        GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, static_cast<GLint>(wrapping));
+
+        constexpr int base_mipmap_level = 0; // just bare level, we don't care
+        constexpr int zero_border       = 0;
+        GL::TexImage2D(GL_TEXTURE_2D, base_mipmap_level, GL_RGBA8, size.x, size.y, zero_border, GL_RGBA, GL_UNSIGNED_BYTE, colors.data());
+        GL::BindTexture(GL_TEXTURE_2D, 0);
+        return texture;
+    }
+
+    TextureHandle CreateRGBATexture(Math::ivec2 size, Filtering filtering, Wrapping wrapping) noexcept
+    {
+        TextureHandle texture{};
+        GL::GenTextures(1, &texture);
+        GL::BindTexture(GL_TEXTURE_2D, texture);
+        GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, static_cast<GLint>(filtering));
+        GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, static_cast<GLint>(filtering));
+
+        GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, static_cast<GLint>(wrapping));
+        GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, static_cast<GLint>(wrapping));
+
+        constexpr int base_mipmap_level = 0; // just bare level, we don't care
+        constexpr int zero_border       = 0;
+         if (OpenGL::IsWebGL || OpenGL::current_version() >= OpenGL::version(4, 2))
+         {
+             GL::TexStorage2D(GL_TEXTURE_2D, base_mipmap_level + 1, GL_RGBA8, size.x, size.y);
+         }
+         else
+         {
+            GL::TexImage2D(GL_TEXTURE_2D, base_mipmap_level, GL_RGBA8, size.x, size.y, zero_border, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);//match channel!!!!!!!!!!!!!!
+         }
+        
+        GL::BindTexture(GL_TEXTURE_2D, 0);
+        return texture;
+    }
+
+    void SetFiltering(TextureHandle texture_handle, Filtering filtering) noexcept
+    {
+        GL::BindTexture(GL_TEXTURE_2D, texture_handle);
+        GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, static_cast<GLint>(filtering));
+        GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, static_cast<GLint>(filtering));
+        GL::BindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    void SetWrapping(TextureHandle texture_handle, Wrapping wrapping, TextureCoordinate coord) noexcept
+    {
+        GL::BindTexture(GL_TEXTURE_2D, texture_handle);
+        switch (coord)
+        {
+            case TextureCoordinate::Both:
+                GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, static_cast<GLint>(wrapping));
+                GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, static_cast<GLint>(wrapping));
+                break;
+            case TextureCoordinate::S: GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, static_cast<GLint>(wrapping)); break;
+            case TextureCoordinate::T: GL::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, static_cast<GLint>(wrapping)); break;
+        }
+
+        GL::BindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    
+}
+
+
+
+================================================
+FILE: source/OpenGL/Texture.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+
+#include "CS200/RGBA.h"
+#include "Engine/Vec2.h"
+#include "GLConstants.h"
+#include "GLTypes.h"
+#include "Handle.h"
+#include <filesystem>
+#include <span>
+
+namespace CS200
+{
+    class Image;
+}
+
+namespace OpenGL
+{
+    /**
+     * \brief Texture filtering modes for controlling pixel sampling behavior
+     *
+     * Filtering determines how OpenGL samples texture pixels when the texture
+     * is displayed at a different size than its native resolution. The choice
+     * between nearest-pixel and linear filtering dramatically affects the
+     * visual appearance of textures.
+     *
+     * Filtering affects both magnification (when texture appears larger than
+     * its pixel resolution) and minification (when texture appears smaller).
+     * The choice depends on the desired visual style and performance requirements.
+     *
+     * Visual characteristics:
+     * - NearestPixel: Sharp, pixelated appearance with hard edges
+     * - Linear: Smooth, blended appearance with soft edges
+     *
+     * Performance considerations:
+     * - NearestPixel: Faster sampling, lower memory bandwidth
+     * - Linear: More expensive sampling, higher memory bandwidth
+     */
+    enum class Filtering : GLint
+    {
+        NearestPixel = GL_NEAREST, ///< Sharp pixelated sampling, ideal for pixel art and crisp graphics
+        Linear       = GL_LINEAR   ///< Smooth interpolated sampling, ideal for photographs and realistic textures
+    };
+
+    /**
+     * \brief Texture wrapping modes for controlling behavior outside texture boundaries
+     *
+     * Wrapping determines what happens when texture coordinates fall outside
+     * the [0,1] range. Different wrapping modes enable various tiling and
+     * clamping behaviors essential for different rendering scenarios.
+     *
+     * Each mode serves specific use cases:
+     * - Tiling textures (Repeat, MirroredRepeat)
+     * - UI elements and single textures (ClampToEdge, ClampToBorder)
+     * - Special effects and seamless patterns (MirrorClampToEdge)
+     *
+     * The wrapping mode is applied to both S (horizontal) and T (vertical)
+     * texture coordinate axes, affecting how textures extend beyond their
+     * original boundaries.
+     */
+    enum class Wrapping : GLint
+    {
+        Repeat         = GL_REPEAT,          ///< Tile texture infinitely in all directions
+        ClampToEdge    = GL_CLAMP_TO_EDGE,   ///< Stretch edge pixels, preventing tiling artifacts
+        MirroredRepeat = GL_MIRRORED_REPEAT, ///< Tile with alternating mirror reflections
+    };
+
+    /**
+     * \brief Descriptive alias for OpenGL texture object handles
+     *
+     * TextureHandle provides a more specific and readable name for the generic
+     * OpenGL handle type when referring to texture objects. This improves code
+     * clarity without adding compile-time type safety.
+     */
+    using TextureHandle = Handle;
+
+    /**
+     * \brief Create OpenGL texture from loaded image data
+     * \param image Image object containing loaded pixel data and dimensions
+     * \param filtering Texture sampling method (default: nearest pixel for crisp graphics)
+     * \param wrapping Texture coordinate wrapping behavior (default: repeat for tiling)
+     * \return Handle to the created OpenGL texture object
+     *
+     * Creates an OpenGL texture from a pre-loaded Image object, transferring the
+     * pixel data to GPU memory and configuring the texture for rendering use.
+     * This is the standard approach for loading textures from image files.
+     *
+     * The image data is transferred in RGBA format with the specified filtering
+     * and wrapping settings applied immediately. The texture is ready for use
+     * in rendering operations after creation.
+     *
+     * Common usage patterns:
+     * - Loading sprite textures from PNG/JPEG files
+     * - Creating texture atlases for efficient batch rendering
+     * - Loading UI element graphics and icons
+     * - Importing procedurally generated images
+     *
+     * The function extracts size and pixel data from the Image object and
+     * delegates to CreateTextureFromMemory() for the actual OpenGL setup.
+     * This provides a convenient interface while maintaining implementation
+     * consistency across different texture creation methods.
+     */
+    [[nodiscard]] TextureHandle CreateTextureFromImage(const CS200::Image& image, Filtering filtering = Filtering::NearestPixel, Wrapping wrapping = Wrapping::Repeat) noexcept;
+
+    /**
+     * \brief Create OpenGL texture from raw pixel data in memory
+     * \param size Texture dimensions in pixels (width, height)
+     * \param colors Span of RGBA pixel data in row-major order
+     * \param filtering Texture sampling method (default: nearest pixel)
+     * \param wrapping Texture coordinate wrapping behavior (default: repeat)
+     * \return Handle to the created OpenGL texture object
+     *
+     * Creates an OpenGL texture directly from a span of RGBA color data,
+     * providing maximum flexibility for programmatically generated textures
+     * or custom pixel data sources. The pixel data is transferred to GPU
+     * memory and configured for immediate rendering use.
+     *
+     * Pixel data requirements:
+     * - Must contain exactly (width 횞 height) RGBA values
+     * - Data is interpreted in row-major order (left-to-right, top-to-bottom)
+     * - Each pixel is a packed 32-bit RGBA value
+     *
+     * Common use cases:
+     * - Procedurally generated textures (noise, patterns, gradients)
+     * - Runtime texture modification and updates
+     * - Converting between different color formats
+     * - Creating textures from mathematical functions
+     * - Importing from custom or binary file formats
+     *
+     * The implementation creates the OpenGL texture object, applies the
+     * specified filtering and wrapping settings, and uploads the pixel
+     * data using GL::TexImage2D() for immediate GPU availability.
+     */
+    [[nodiscard]] TextureHandle
+        CreateTextureFromMemory(Math::ivec2 size, std::span<const CS200::RGBA> colors, Filtering filtering = Filtering::NearestPixel, Wrapping wrapping = Wrapping::Repeat) noexcept;
+
+    /**
+     * \brief Create empty RGBA texture without initial pixel data
+     * \param size Texture dimensions in pixels (width, height)
+     * \param filtering Texture sampling method (default: nearest pixel)
+     * \param wrapping Texture coordinate wrapping behavior (default: repeat)
+     * \return Handle to the created OpenGL texture object
+     *
+     * Creates an OpenGL texture with allocated GPU memory but no initial pixel
+     * data. This is optimal for textures that will be used as render targets
+     * (framebuffer attachments) or will have their data uploaded later through
+     * other means.
+     *
+     * The texture is created with RGBA8 format, providing 8 bits per channel
+     * for standard color representation. The memory is allocated but contains
+     * undefined initial values until populated through rendering operations
+     * or explicit data uploads.
+     *
+     * Primary use cases:
+     * - Framebuffer color attachments for render-to-texture operations
+     * - Dynamic textures that will be updated at runtime
+     * - Temporary render targets for multi-pass rendering
+     * - Screen capture or screenshot buffers
+     * - Procedural texture generation targets
+     *
+     * The implementation uses different OpenGL functions depending on the
+     * available OpenGL version: GL::TexStorage2D() for newer versions (more
+     * efficient) or GL::TexImage2D() with null data for compatibility.
+     *
+     * Memory efficiency:
+     * Creating empty textures avoids unnecessary data transfers and is
+     * particularly efficient when the texture will be written to by
+     * rendering operations rather than CPU-provided data.
+     */
+    [[nodiscard]] TextureHandle CreateRGBATexture(Math::ivec2 size, Filtering filtering = Filtering::NearestPixel, Wrapping wrapping = Wrapping::Repeat) noexcept;
+
+    /**
+     * \brief Update texture filtering mode after creation
+     * \param texture_handle Handle to the texture object to modify
+     * \param filtering New filtering mode to apply
+     *
+     * Changes the texture sampling behavior for an existing texture object.
+     * This allows runtime switching between crisp pixel-perfect rendering
+     * and smooth interpolated rendering based on visual requirements or
+     * user preferences.
+     *
+     * The filtering setting affects both magnification and minification,
+     * determining how the texture appears when scaled larger or smaller
+     * than its native resolution.
+     *
+     * Common scenarios:
+     * - Switching between pixel art and smooth rendering modes
+     * - Adjusting texture quality based on performance requirements
+     * - Creating visual effects with different sampling characteristics
+     * - Implementing user-configurable graphics quality settings
+     *
+     * The function temporarily binds the texture, updates both MIN_FILTER
+     * and MAG_FILTER parameters, then unbinds the texture. This ensures
+     * the filtering change takes effect immediately for subsequent rendering.
+     */
+    void SetFiltering(TextureHandle texture_handle, Filtering filtering) noexcept;
+
+    enum TextureCoordinate
+    {
+        S,
+        T,
+        Both
+    };
+
+    /**
+     * \brief Update texture wrapping mode after creation
+     * \param texture_handle Handle to the texture object to modify
+     * \param wrapping New wrapping mode to apply
+     * \param coord Texture coordinate axis to apply the wrapping mode (default: both S and T)
+     *
+     * Changes how the texture behaves when texture coordinates extend beyond
+     * the [0,1] range. This enables runtime switching between different tiling
+     * and clamping behaviors without recreating the texture.
+     *
+     * The wrapping mode can be applied to S (horizontal), T (vertical), or both
+     * texture coordinate axes, affecting how the texture extends in all
+     * directions beyond its boundaries.
+     *
+     * Dynamic wrapping use cases:
+     * - Switching between tiled and non-tiled rendering modes
+     * - Adapting texture behavior for different rendering contexts
+     * - Creating visual effects with changing boundary conditions
+     * - Implementing different texture addressing for UI vs. world geometry
+     *
+     * The function temporarily binds the texture, updates WRAP_S,
+     * WRAP_T, or both parameters with the new wrapping mode, then unbinds the texture.
+     * Changes take effect immediately for subsequent texture sampling operations.
+     */
+    void SetWrapping(TextureHandle texture_handle, Wrapping wrapping, TextureCoordinate coord = TextureCoordinate::Both) noexcept;
+}
+
+
+
+================================================
+FILE: source/OpenGL/VertexArray.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#include "VertexArray.h"
+#include "GL.h"
+
+namespace OpenGL
+{
+    /**
+     * \brief Creates and configures a Vertex Array Object (VAO) with multiple vertex buffers and optional index buffer
+     *
+     * This function sets up a complete VAO by:
+     * 1. Generating a new VAO handle
+     * 2. Binding vertex buffers and configuring their attribute layouts
+     * 3. Setting up vertex attribute pointers for each attribute (position, color, texture coords, etc.)
+     * 4. Handling both regular floating-point and integer vertex attributes
+     * 5. Configuring instanced rendering divisors if needed
+     * 6. Optionally binding an index buffer for indexed drawing
+     *
+     * A VAO encapsulates all the vertex attribute state, so once created, you can simply bind
+     * the VAO to use all the configured vertex buffers and their layouts for rendering.
+     *
+     * \param vertices An initializer list of VertexBuffer objects, each containing:
+     *                 - buffer_handle: The OpenGL buffer handle containing vertex data
+     *                 - buffer_layout: Description of how the data is organized (attributes, stride, offset)
+     * \param index_buffer Optional index buffer handle for indexed rendering (0 if not used)
+     *
+     * \return VertexArrayHandle The OpenGL handle to the created VAO
+     *
+     * \note The VAO will be unbound (set to 0) before returning to avoid affecting subsequent OpenGL state
+     * \note Each vertex attribute will be assigned sequential attribute indices starting from 0
+     */
+    VertexArrayHandle CreateVertexArrayObject([[maybe_unused]] std::initializer_list<VertexBuffer> vertices, [[maybe_unused]] BufferHandle index_buffer)
+    {
+        // PSEUDO CODE for CreateVertexArrayObject:
+        // 1. Create a new Vertex Array Object (VAO)
+        // 2. Bind the VAO to make it active
+        // 3. For each vertex buffer:
+        //    a. Bind the buffer as GL_ARRAY_BUFFER
+        //    b. Calculate the stride (total bytes per vertex)
+        //    c. For each attribute in the buffer layout:
+        //       - Enable the vertex attribute array
+        //       - Set up the vertex attribute pointer (regular or integer)
+        //       - Set the vertex attribute divisor for instancing
+        // 4. If an index buffer is provided, bind it as GL_ELEMENT_ARRAY_BUFFER
+        // 5. Unbind the VAO (bind 0)
+        // 6. Return the VAO handle
+
+        // Declare a variable to hold the VAO handle
+        VertexArrayHandle vao{};
+
+        GL::GenVertexArrays(1, &vao);
+        // Pass 1 for count and the address of vao to store the generated handle
+        // Documentation: https://docs.gl/es3/glGenVertexArrays
+
+        GL::BindVertexArray(vao);
+        // This makes all subsequent vertex attribute calls affect this VAO
+        // Documentation: https://docs.gl/es3/glBindVertexArray
+
+        // Keep track of the current attribute index (starts at 0)
+        [[maybe_unused]] GLuint attribute_index = 0;
+
+        // Each VertexBuffer contains a buffer_handle and buffer_layout
+        // Use structured binding:
+        for (const auto& [buffer_handle, buffer_layout] : vertices)
+        {
+            // This tells OpenGL which buffer to read vertex data from
+            // Documentation: https://docs.gl/es3/glBindBuffer
+            GL::BindBuffer(GL_ARRAY_BUFFER, buffer_handle);
+
+            // Loop through all attributes in buffer_layout.Attributes
+            // Sum up each attr_type.SizeBytes to get the total stride
+            [[maybe_unused]] GLsizei stride = 0;
+            for (const auto& attr_type : buffer_layout.Attributes)
+            {
+                stride += attr_type.SizeBytes;
+            }
+
+            // Cast buffer_layout.BufferStartingByteOffset to GLintptr
+            [[maybe_unused]] GLintptr offset = 0;
+            offset                           = static_cast<GLintptr>(buffer_layout.BufferStartingByteOffset);
+
+            // Use:
+            for (Attribute::Type attr_type : buffer_layout.Attributes)
+            {
+                if (attr_type == Attribute::None)
+                {
+                    continue;
+                }
+
+                // Documentation: https://docs.gl/es3/glEnableVertexAttribArray
+                GL::EnableVertexAttribArray(attribute_index);
+                const GLenum    gl_type         = attr_type.GLType;
+                const GLint     component_count = attr_type.ComponentCount;
+                const GLboolean normalized      = attr_type.Normalize;
+                const bool      is_integer      = attr_type.IntAttribute;
+                const GLuint    divisor         = attr_type.Divisor;
+
+                if (is_integer == true)
+                {
+                    // If true:
+                    //   Use GL::VertexAttribIPointer for integer attributes
+                    GL::VertexAttribIPointer(attribute_index, component_count, gl_type, stride, reinterpret_cast<GLvoid*>(offset));
+                    //   Parameters: (attribute_index, component_count, gl_type, stride, offset as GLvoid*)
+                    //   Documentation: https://docs.gl/es3/glVertexAttribPointer (contains VertexAttribIPointer)
+                }
+                else
+                {
+                    // Else:
+                    //   Use GL::VertexAttribPointer for float/normalized attributes
+                    GL::VertexAttribPointer(attribute_index, component_count, gl_type, normalized, stride, reinterpret_cast<GLvoid*>(offset));
+                    //   Parameters: (attribute_index, component_count, gl_type, normalized, stride, offset as GLvoid*)
+                    //   Documentation: https://docs.gl/es3/glVertexAttribPointer
+                }
+
+
+                GL::VertexAttribDivisor(attribute_index, divisor);
+                // Parameters: (attribute_index, divisor)
+                // Documentation: https://docs.gl/es3/glVertexAttribDivisor
+
+                ++attribute_index;
+
+                offset += attr_type.SizeBytes;
+            }
+        }
+
+        if (index_buffer != 0)
+        {
+            // If true:
+            //   Bind the index buffer as GL_ELEMENT_ARRAY_BUFFER
+            GL::BindBuffer(GL_ELEMENT_ARRAY_BUFFER, index_buffer);
+            //   Documentation: https://docs.gl/es3/glBindBuffer
+        }
+
+
+        GL::BindVertexArray(0);
+        // This ensures we don't accidentally modify this VAO later
+        // Documentation: https://docs.gl/es3/glBindVertexArray
+
+        return vao;
+    }
+
+    VertexArrayHandle CreateVertexArrayObject(VertexBuffer vertices, BufferHandle index_buffer)
+    {
+        return CreateVertexArrayObject({ vertices }, index_buffer);
+    }
+
+}
+
+
+
+================================================
+FILE: source/OpenGL/VertexArray.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+#include "GLConstants.h"
+#include "GLTypes.h"
+#include "Handle.h"
+#include <cstdint>
+#include <initializer_list>
+#include <utility>
+#include <vector>
+
+namespace OpenGL
+{
+	/**
+	 * \brief Descriptive alias for OpenGL buffer object handles
+	 *
+	 * BufferHandle provides a more specific and readable name for the generic
+	 * OpenGL handle type when referring to buffer objects. This improves code
+	 * clarity without adding compile-time type safety.
+	 */
+	using BufferHandle = Handle;
+
+	/**
+	 * \brief Descriptive alias for OpenGL vertex array object handles
+	 *
+	 * VertexArrayHandle provides a more specific and readable name for the generic
+	 * OpenGL handle type when referring to vertex array objects (VAOs). This improves
+	 * code clarity without adding compile-time type safety.
+	 */
+	using VertexArrayHandle = Handle;
+
+	namespace Attribute
+	{
+		/**
+		 * \brief Compact vertex attribute descriptor for efficient OpenGL vertex specification
+		 *
+		 * Type provides a space-efficient way to describe vertex attributes by packing
+		 * all the necessary OpenGL vertex attribute information into a single 32-bit value.
+		 * This includes the data type, component count, size, normalization settings,
+		 * and instancing divisor values.
+		 *
+		 * The bit-packed design allows for:
+		 * - Efficient storage of attribute specifications
+		 * - Fast comparison and sorting of attribute layouts
+		 * - Compile-time computation of attribute configurations
+		 * - Support for both integer and float attribute types
+		 * - Instanced rendering through divisor values
+		 *
+		 * Bit Layout:
+		 * - Bits 15-0:  OpenGL component type (GL_FLOAT, GL_UNSIGNED_BYTE, etc.)
+		 * - Bits 18-16: Component count (1-4 components per attribute)
+		 * - Bits 23-19: Attribute size in bytes (1-16 bytes)
+		 * - Bit 24:     Normalization flag for integer-to-float conversion
+		 * - Bit 25:     Integer attribute flag (glVertexAttribIPointer vs glVertexAttribPointer)
+		 * - Bits 31-26: Instancing divisor (0-63) for per-instance attributes
+		 *
+		 * This design enables both standard per-vertex attributes and advanced
+		 * instanced rendering techniques while maintaining compatibility with
+		 * OpenGL's vertex attribute specification requirements.
+		 */
+		struct Type
+		{
+			uint16_t GLType			: 16; // Bits 15-0   (16 bits): OpenGL component type (GL_BYTE, GL_UNSIGNED_BYTE, GL_SHORT, etc.)
+			uint8_t	 ComponentCount : 3;  // Bits 18-16   (3 bits): Component count (1, 2, 3, 4)
+			uint8_t	 SizeBytes		: 5;  // Bits 23-19   (5 bits): Attribute size in bytes (max size is 16 - vec4)
+			bool	 Normalize		: 1;  // Bit  24      (1 bit) : Normalized flag (0 = false, 1 = true)
+			bool	 IntAttribute	: 1;  // Bit  25      (1 bit) : Integer attribute flag (0 = use glVertexAttribPointer, 1 = use glVertexAttribIPointer)
+			uint8_t	 Divisor		: 6;  // Bits 26-31   (6 bits): Divisor Value to support instancing (0-63)
+
+			constexpr auto operator<=>(const Type&) const noexcept = default;
+
+			/**
+			 * \brief Set the instancing divisor for per-instance attributes
+			 * \param divisor_value Divisor for instanced rendering (0 = per-vertex, >0 = per-instance)
+			 * \return Reference to this Type for method chaining
+			 *
+			 * Configures the attribute for instanced rendering by setting how frequently
+			 * the attribute advances during instanced drawing calls. A divisor of 0 means
+			 * the attribute advances once per vertex (standard behavior), while values
+			 * greater than 0 cause the attribute to advance once per N instances.
+			 *
+			 * Common divisor patterns:
+			 * - 0: Per-vertex data (positions, normals, texture coordinates)
+			 * - 1: Per-instance data (transformation matrices, colors, IDs)
+			 * - N: Per-N-instances data (shared data across multiple instances)
+			 *
+			 * This enables efficient instanced rendering where certain attributes
+			 * remain constant across multiple instances of the same geometry.
+			 */
+			//constexpr Type& WithDivisor(uint8_t divisor_value) noexcept
+			//{
+			//	Divisor = divisor_value & 0x3F; // only 6 bits
+			//	return *this;
+			//}
+
+			//make copy instead so that compatible with constexpr variables
+			constexpr Type WithDivisor(uint8_t divisor_value) const noexcept
+			{
+				Type copy	 = *this;				 
+				copy.Divisor = divisor_value & 0x3F; 
+				return copy;						 
+			}
+		};
+
+		static_assert(sizeof(Type) == sizeof(uint32_t));
+	}
+
+	/**
+	 * \brief Layout specification for vertex attributes within a buffer
+	 *
+	 * BufferLayout describes how vertex attributes are organized within a single
+	 * buffer object, including their types, order, and optional starting offset.
+	 * This enables flexible vertex data organization and supports interleaved
+	 * vertex formats, multiple attribute streams, and complex data layouts.
+	 *
+	 * The layout system supports:
+	 * - Interleaved vertex data (position, normal, texture coordinates in sequence)
+	 * - Multiple attribute streams from the same buffer
+	 * - Buffer sub-regions with custom starting offsets
+	 * - Mixed attribute types and sizes within the same buffer
+	 *
+	 * Common vertex layout patterns:
+	 * - Simple: {Float3, Float2} for position + texture coordinates
+	 * - Complete: {Float3, Float3, Float2} for position + normal + UV
+	 * - Packed: {UByte4ToNormalized} for compressed color attributes
+	 * - Instanced: Mix of per-vertex and per-instance attributes
+	 *
+	 * The starting byte offset enables using sub-regions of larger buffers
+	 * or skipping headers in complex buffer formats.
+	 */
+	struct BufferLayout
+	{
+		/** \brief Byte offset from buffer start where attribute data begins */
+		uint32_t BufferStartingByteOffset = 0;
+
+		/** \brief Ordered list of attribute types in this buffer layout */
+		std::vector<Attribute::Type> Attributes{};
+
+		BufferLayout() = default;
+
+		/**
+		 * \brief Create layout with attributes starting at buffer beginning
+		 * \param attributes Initializer list of attribute types in order
+		 */
+		BufferLayout(std::initializer_list<Attribute::Type> attributes) : BufferStartingByteOffset{ 0 }, Attributes{ attributes }
+		{
+		}
+
+		/**
+		 * \brief Create layout with custom starting offset
+		 * \param starting_byte_offset Byte offset from buffer start
+		 * \param attributes Initializer list of attribute types in order
+		 */
+		BufferLayout(uint32_t starting_byte_offset, std::initializer_list<Attribute::Type> attributes) : BufferStartingByteOffset{ starting_byte_offset }, Attributes{ attributes }
+		{
+		}
+	};
+
+	/**
+	 * \brief Complete vertex buffer specification with handle and layout information
+	 *
+	 * VertexBuffer pairs an OpenGL buffer object with its corresponding layout
+	 * description, providing all the information needed to configure vertex
+	 * attributes for rendering. This combination ensures that buffer data
+	 * and its interpretation are kept together as a cohesive unit.
+	 *
+	 * The structure enables:
+	 * - Self-describing vertex buffers with embedded layout information
+	 * - Easy sharing of buffer configurations across rendering operations
+	 * - Type-safe vertex attribute setup through layout specifications
+	 * - Support for multiple vertex streams with different layouts
+	 *
+	 * Usage patterns:
+	 * - Single buffer with interleaved vertex data
+	 * - Multiple buffers with different attribute types
+	 * - Instanced rendering with per-vertex and per-instance streams
+	 * - Dynamic vertex buffers with consistent layouts
+	 *
+	 * The layout information is used during Vertex Array Object creation
+	 * to automatically configure the appropriate vertex attribute pointers
+	 * and enable the correct attribute locations.
+	 */
+	struct VertexBuffer
+	{
+		/** \brief Handle to the OpenGL buffer object containing vertex data */
+		BufferHandle Handle{ 0 };
+
+		/** \brief Layout specification describing how attributes are organized */
+		BufferLayout Layout{};
+	};
+
+	/**
+	 * \brief Create Vertex Array Object (VAO) from multiple vertex buffers
+	 * \param vertices Initializer list of vertex buffers with their layouts
+	 * \param index_buffer Optional element buffer for indexed rendering (default: 0)
+	 * \return Handle to the created and configured Vertex Array Object
+	 *
+	 * Creates a complete Vertex Array Object that encapsulates the vertex attribute
+	 * configuration for multiple vertex buffers. This enables complex vertex setups
+	 * with multiple attribute streams, different data types, and sophisticated
+	 * rendering techniques like instanced rendering.
+	 *
+	 * The function performs comprehensive VAO setup:
+	 * - Creates and binds a new Vertex Array Object
+	 * - Configures vertex attributes for each buffer according to its layout
+	 * - Calculates appropriate strides and offsets for interleaved data
+	 * - Sets up instancing divisors for per-instance attributes
+	 * - Binds optional index buffer for indexed rendering
+	 * - Enables all configured vertex attribute arrays
+	 *
+	 * Multi-buffer capabilities:
+	 * - Separate buffers for different attribute types (positions, normals, UVs)
+	 * - Mixed per-vertex and per-instance attribute streams
+	 * - Different data formats optimized for specific attribute types
+	 * - Independent update frequencies for dynamic vs. static data
+	 *
+	 * Attribute configuration:
+	 * Each buffer's layout is processed to determine the correct OpenGL vertex
+	 * attribute setup, including proper use of GL::VertexAttribPointer() for
+	 * floating-point data and GL::VertexAttribIPointer() for integer data.
+	 *
+	 * The resulting VAO can be bound once for rendering, eliminating the need
+	 * to reconfigure vertex attributes on every draw call.
+	 */
+	VertexArrayHandle CreateVertexArrayObject(std::initializer_list<VertexBuffer> vertices, BufferHandle index_buffer = 0);
+
+	/**
+	 * \brief Create Vertex Array Object (VAO) from a single vertex buffer
+	 * \param vertices Single vertex buffer with its layout specification
+	 * \param index_buffer Optional element buffer for indexed rendering (default: 0)
+	 * \return Handle to the created and configured Vertex Array Object
+	 *
+	 * Creates a Vertex Array Object for the common case of a single vertex buffer
+	 * containing all required vertex attributes. This is a convenience wrapper
+	 * around the multi-buffer version, ideal for simple rendering scenarios
+	 * with interleaved vertex data.
+	 *
+	 * Single-buffer advantages:
+	 * - Simplified memory management with one buffer object
+	 * - Better cache coherency with interleaved vertex data
+	 * - Reduced OpenGL state changes during attribute setup
+	 * - Lower memory overhead for simple vertex formats
+	 *
+	 * Common interleaved patterns:
+	 * - Position + Color: {Float3, Float4} or {Float2, UByte4ToNormalized}
+	 * - Position + UV: {Float3, Float2} for textured geometry
+	 * - Complete vertex: {Float3, Float3, Float2} for position + normal + UV
+	 * - Sprite data: {Float2, Float2} for position + texture coordinates
+	 *
+	 * The function delegates to the multi-buffer version with a single-element
+	 * initializer list, ensuring consistent behavior and implementation while
+	 * providing a cleaner API for simple use cases.
+	 */
+	VertexArrayHandle CreateVertexArrayObject(VertexBuffer vertices, BufferHandle index_buffer = 0);
+
+	namespace Attribute
+	{
+		namespace details
+		{
+			// Constants for encoding
+			constexpr bool NORMALIZE	= true;
+			constexpr bool NO_NORMALIZE = false;
+			constexpr bool TO_INT		= true;	 // Use glVertexAttribIPointer
+			constexpr bool TO_FLOAT		= false; // Use glVertexAttribPointer
+
+		}
+
+		/**
+		 * \brief Predefined vertex attribute types for common data formats
+		 *
+		 * This collection provides pre-configured attribute types for all common
+		 * vertex data formats, eliminating the need to manually specify OpenGL
+		 * types, component counts, and conversion settings. Each attribute type
+		 * is optimized for its specific use case and shader input requirements.
+		 *
+		 * Naming Convention:
+		 * - Base types: Bool, Byte, Short, Int, UByte, UShort, UInt, Float
+		 * - Vector types: Type2, Type3, Type4 (e.g., Float2, Int3, UByte4)
+		 * - Conversions: TypeToFloat, TypeToNormalized (e.g., ByteToFloat, UByteToNormalized)
+		 *
+		 * Conversion Types:
+		 * - ToFloat: Convert integer types to float without normalization
+		 * - ToNormalized: Convert integer types to normalized float ranges
+		 *   - Signed types: [-1, 1] range (Byte, Short, Int)
+		 *   - Unsigned types: [0, 1] range (UByte, UShort, UInt)
+		 *
+		 * Memory Optimization:
+		 * - Use smaller integer types (Byte, UByte) for packed data
+		 * - Use normalized conversions for color and normal data
+		 * - Use native Float types for precise calculations
+		 *
+		 * Common Usage Patterns:
+		 * - Positions: Float2, Float3
+		 * - Colors: UByte4ToNormalized (compact), Float4 (precise)
+		 * - Normals: Float3, Byte3ToNormalized (compact)
+		 * - Texture Coordinates: Float2
+		 * - Indices: UShort, UInt (in index buffers)
+		 *
+		 * Instancing Support:
+		 * All attribute types can be modified with .WithDivisor(N) to create
+		 * per-instance attributes for instanced rendering techniques.
+		 */
+
+		constexpr Type None				   = { 0, 0, 0, 0, 0, 0 };
+		constexpr Type Bool				   = { GL_UNSIGNED_BYTE, 1, 1 * sizeof(uint8_t), details::NO_NORMALIZE, details::TO_INT, 0 };			// bool -> bool
+		constexpr Type Bool2			   = { GL_UNSIGNED_BYTE, 2, 2 * sizeof(uint8_t), details::NO_NORMALIZE, details::TO_INT, 0 };			// bool[2] -> bvec2
+		constexpr Type Bool3			   = { GL_UNSIGNED_BYTE, 3, 3 * sizeof(uint8_t), details::NO_NORMALIZE, details::TO_INT, 0 };			// bool[3] -> bvec3
+		constexpr Type Bool4			   = { GL_UNSIGNED_BYTE, 4, 4 * sizeof(uint8_t), details::NO_NORMALIZE, details::TO_INT, 0 };			// bool[4] -> bvec4
+		constexpr Type Byte				   = { GL_BYTE, 1, 1 * sizeof(int8_t), details::NO_NORMALIZE, details::TO_INT, 0 };						// int8_t -> int
+		constexpr Type Byte2			   = { GL_BYTE, 2, 2 * sizeof(int8_t), details::NO_NORMALIZE, details::TO_INT, 0 };						// int8_t[2] -> ivec2
+		constexpr Type Byte2ToFloat		   = { GL_BYTE, 2, 2 * sizeof(int8_t), details::NO_NORMALIZE, details::TO_FLOAT, 0 };					// int8_t[2] -> vec2
+		constexpr Type Byte2ToNormalized   = { GL_BYTE, 2, 2 * sizeof(int8_t), details::NORMALIZE, details::TO_FLOAT, 0 };						// int8_t[2] -> vec2 [-1, 1]
+		constexpr Type Byte3			   = { GL_BYTE, 3, 3 * sizeof(int8_t), details::NO_NORMALIZE, details::TO_INT, 0 };						// int8_t[3] -> ivec3
+		constexpr Type Byte3ToFloat		   = { GL_BYTE, 3, 3 * sizeof(int8_t), details::NO_NORMALIZE, details::TO_FLOAT, 0 };					// int8_t[3] -> vec3
+		constexpr Type Byte3ToNormalized   = { GL_BYTE, 3, 3 * sizeof(int8_t), details::NORMALIZE, details::TO_FLOAT, 0 };						// int8_t[3] -> vec3 [-1, 1]
+		constexpr Type Byte4			   = { GL_BYTE, 4, 4 * sizeof(int8_t), details::NO_NORMALIZE, details::TO_INT, 0 };						// int8_t[4] -> ivec4
+		constexpr Type Byte4ToFloat		   = { GL_BYTE, 4, 4 * sizeof(int8_t), details::NO_NORMALIZE, details::TO_FLOAT, 0 };					// int8_t[4] -> vec4
+		constexpr Type Byte4ToNormalized   = { GL_BYTE, 4, 4 * sizeof(int8_t), details::NORMALIZE, details::TO_FLOAT, 0 };						// int8_t[4] -> vec4 [-1, 1]
+		constexpr Type ByteToFloat		   = { GL_BYTE, 1, 1 * sizeof(int8_t), details::NO_NORMALIZE, details::TO_FLOAT, 0 };					// int8_t -> float
+		constexpr Type ByteToNormalized	   = { GL_BYTE, 1, 1 * sizeof(int8_t), details::NORMALIZE, details::TO_FLOAT, 0 };						// int8_t -> float [-1, 1]
+		constexpr Type Float			   = { GL_FLOAT, 1, 1 * sizeof(float), details::NO_NORMALIZE, details::TO_FLOAT, 0 };					// float -> float
+		constexpr Type Float2			   = { GL_FLOAT, 2, 2 * sizeof(float), details::NO_NORMALIZE, details::TO_FLOAT, 0 };					// float[2] -> vec2
+		constexpr Type Float3			   = { GL_FLOAT, 3, 3 * sizeof(float), details::NO_NORMALIZE, details::TO_FLOAT, 0 };					// float[3] -> vec3
+		constexpr Type Float4			   = { GL_FLOAT, 4, 4 * sizeof(float), details::NO_NORMALIZE, details::TO_FLOAT, 0 };					// float[4] -> vec4
+		constexpr Type Int				   = { GL_INT, 1, 1 * sizeof(int), details::NO_NORMALIZE, details::TO_INT, 0 };							// int -> int
+		constexpr Type Int2				   = { GL_INT, 2, 2 * sizeof(int), details::NO_NORMALIZE, details::TO_INT, 0 };							// int[2] -> ivec2
+		constexpr Type Int2ToFloat		   = { GL_INT, 2, 2 * sizeof(int), details::NO_NORMALIZE, details::TO_FLOAT, 0 };						// int[2] -> vec2
+		constexpr Type Int2ToNormalized	   = { GL_INT, 2, 2 * sizeof(int), details::NORMALIZE, details::TO_FLOAT, 0 };							// int[2] -> vec2 [-1, 1]
+		constexpr Type Int3				   = { GL_INT, 3, 3 * sizeof(int), details::NO_NORMALIZE, details::TO_INT, 0 };							// int[3] -> ivec3
+		constexpr Type Int3ToFloat		   = { GL_INT, 3, 3 * sizeof(int), details::NO_NORMALIZE, details::TO_FLOAT, 0 };						// int[3] -> vec3
+		constexpr Type Int3ToNormalized	   = { GL_INT, 3, 3 * sizeof(int), details::NORMALIZE, details::TO_FLOAT, 0 };							// int[3] -> vec3 [-1, 1]
+		constexpr Type Int4				   = { GL_INT, 4, 4 * sizeof(int), details::NO_NORMALIZE, details::TO_INT, 0 };							// int[4] -> ivec4
+		constexpr Type Int4ToFloat		   = { GL_INT, 4, 4 * sizeof(int), details::NO_NORMALIZE, details::TO_FLOAT, 0 };						// int[4] -> vec4
+		constexpr Type Int4ToNormalized	   = { GL_INT, 4, 4 * sizeof(int), details::NORMALIZE, details::TO_FLOAT, 0 };							// int[4] -> vec4 [-1, 1]
+		constexpr Type IntToFloat		   = { GL_INT, 1, 1 * sizeof(int), details::NO_NORMALIZE, details::TO_FLOAT, 0 };						// int -> float
+		constexpr Type IntToNormalized	   = { GL_INT, 1, 1 * sizeof(int), details::NORMALIZE, details::TO_FLOAT, 0 };							// int -> float [-1, 1]
+		constexpr Type Short			   = { GL_SHORT, 1, 1 * sizeof(short), details::NO_NORMALIZE, details::TO_INT, 0 };						// short -> int
+		constexpr Type Short2			   = { GL_SHORT, 2, 2 * sizeof(short), details::NO_NORMALIZE, details::TO_INT, 0 };						// short[2] -> ivec2
+		constexpr Type Short2ToFloat	   = { GL_SHORT, 2, 2 * sizeof(short), details::NO_NORMALIZE, details::TO_FLOAT, 0 };					// short[2] -> vec2
+		constexpr Type Short2ToNormalized  = { GL_SHORT, 2, 2 * sizeof(short), details::NORMALIZE, details::TO_FLOAT, 0 };						// short[2] -> vec2 [-1, 1]
+		constexpr Type Short3			   = { GL_SHORT, 3, 3 * sizeof(short), details::NO_NORMALIZE, details::TO_INT, 0 };						// short[3] -> ivec3
+		constexpr Type Short3ToFloat	   = { GL_SHORT, 3, 3 * sizeof(short), details::NO_NORMALIZE, details::TO_FLOAT, 0 };					// short[3] -> vec3
+		constexpr Type Short3ToNormalized  = { GL_SHORT, 3, 3 * sizeof(short), details::NORMALIZE, details::TO_FLOAT, 0 };						// short[3] -> vec3 [-1, 1]
+		constexpr Type Short4			   = { GL_SHORT, 4, 4 * sizeof(short), details::NO_NORMALIZE, details::TO_INT, 0 };						// short[4] -> ivec4
+		constexpr Type Short4ToFloat	   = { GL_SHORT, 4, 4 * sizeof(short), details::NO_NORMALIZE, details::TO_FLOAT, 0 };					// short[4] -> vec4
+		constexpr Type Short4ToNormalized  = { GL_SHORT, 4, 4 * sizeof(short), details::NORMALIZE, details::TO_FLOAT, 0 };						// short[4] -> vec4 [-1, 1]
+		constexpr Type ShortToFloat		   = { GL_SHORT, 1, 1 * sizeof(short), details::NO_NORMALIZE, details::TO_FLOAT, 0 };					// short -> float
+		constexpr Type ShortToNormalized   = { GL_SHORT, 1, 1 * sizeof(short), details::NORMALIZE, details::TO_FLOAT, 0 };						// short -> float [-1, 1]
+		constexpr Type UByte			   = { GL_UNSIGNED_BYTE, 1, 1 * sizeof(uint8_t), details::NO_NORMALIZE, details::TO_INT, 0 };			// uint8_t -> uint
+		constexpr Type UByte2			   = { GL_UNSIGNED_BYTE, 2, 2 * sizeof(uint8_t), details::NO_NORMALIZE, details::TO_INT, 0 };			// uint8_t[2] -> uvec2
+		constexpr Type UByte2ToFloat	   = { GL_UNSIGNED_BYTE, 2, 2 * sizeof(uint8_t), details::NO_NORMALIZE, details::TO_FLOAT, 0 };			// uint8_t[2] -> vec2
+		constexpr Type UByte2ToNormalized  = { GL_UNSIGNED_BYTE, 2, 2 * sizeof(uint8_t), details::NORMALIZE, details::TO_FLOAT, 0 };			// uint8_t[2] -> vec2 [0, 1]
+		constexpr Type UByte3			   = { GL_UNSIGNED_BYTE, 3, 3 * sizeof(uint8_t), details::NO_NORMALIZE, details::TO_INT, 0 };			// uint8_t[3] -> uvec3
+		constexpr Type UByte3ToFloat	   = { GL_UNSIGNED_BYTE, 3, 3 * sizeof(uint8_t), details::NO_NORMALIZE, details::TO_FLOAT, 0 };			// uint8_t[3] -> vec3
+		constexpr Type UByte3ToNormalized  = { GL_UNSIGNED_BYTE, 3, 3 * sizeof(uint8_t), details::NORMALIZE, details::TO_FLOAT, 0 };			// uint8_t[3] -> vec3 [0, 1]
+		constexpr Type UByte4			   = { GL_UNSIGNED_BYTE, 4, 4 * sizeof(uint8_t), details::NO_NORMALIZE, details::TO_INT, 0 };			// uint8_t[4] -> uvec4
+		constexpr Type UByte4ToFloat	   = { GL_UNSIGNED_BYTE, 4, 4 * sizeof(uint8_t), details::NO_NORMALIZE, details::TO_FLOAT, 0 };			// uint8_t[4] -> vec4
+		constexpr Type UByte4ToNormalized  = { GL_UNSIGNED_BYTE, 4, 4 * sizeof(uint8_t), details::NORMALIZE, details::TO_FLOAT, 0 };			// uint8_t[4] -> vec4 [0, 1]
+		constexpr Type UByteToFloat		   = { GL_UNSIGNED_BYTE, 1, 1 * sizeof(uint8_t), details::NO_NORMALIZE, details::TO_FLOAT, 0 };			// uint8_t -> float
+		constexpr Type UByteToNormalized   = { GL_UNSIGNED_BYTE, 1, 1 * sizeof(uint8_t), details::NORMALIZE, details::TO_FLOAT, 0 };			// uint8_t -> float [0, 1]
+		constexpr Type UInt				   = { GL_UNSIGNED_INT, 1, 1 * sizeof(unsigned int), details::NO_NORMALIZE, details::TO_INT, 0 };		// uint -> uint
+		constexpr Type UInt2			   = { GL_UNSIGNED_INT, 2, 2 * sizeof(unsigned int), details::NO_NORMALIZE, details::TO_INT, 0 };		// uint[2] -> uvec2
+		constexpr Type UInt2ToFloat		   = { GL_UNSIGNED_INT, 2, 2 * sizeof(unsigned int), details::NO_NORMALIZE, details::TO_FLOAT, 0 };		// uint[2] -> vec2
+		constexpr Type UInt2ToNormalized   = { GL_UNSIGNED_INT, 2, 2 * sizeof(unsigned int), details::NORMALIZE, details::TO_FLOAT, 0 };		// uint[2] -> vec2 [0, 1]
+		constexpr Type UInt3			   = { GL_UNSIGNED_INT, 3, 3 * sizeof(unsigned int), details::NO_NORMALIZE, details::TO_INT, 0 };		// uint[3] -> uvec3
+		constexpr Type UInt3ToFloat		   = { GL_UNSIGNED_INT, 3, 3 * sizeof(unsigned int), details::NO_NORMALIZE, details::TO_FLOAT, 0 };		// uint[3] -> vec3
+		constexpr Type UInt3ToNormalized   = { GL_UNSIGNED_INT, 3, 3 * sizeof(unsigned int), details::NORMALIZE, details::TO_FLOAT, 0 };		// uint[3] -> vec3 [0, 1]
+		constexpr Type UInt4			   = { GL_UNSIGNED_INT, 4, 4 * sizeof(unsigned int), details::NO_NORMALIZE, details::TO_INT, 0 };		// uint[4] -> uvec4
+		constexpr Type UInt4ToFloat		   = { GL_UNSIGNED_INT, 4, 4 * sizeof(unsigned int), details::NO_NORMALIZE, details::TO_FLOAT, 0 };		// uint[4] -> vec4
+		constexpr Type UInt4ToNormalized   = { GL_UNSIGNED_INT, 4, 4 * sizeof(unsigned int), details::NORMALIZE, details::TO_FLOAT, 0 };		// uint[4] -> vec4 [0, 1]
+		constexpr Type UIntToFloat		   = { GL_UNSIGNED_INT, 1, 1 * sizeof(unsigned int), details::NO_NORMALIZE, details::TO_FLOAT, 0 };		// uint -> float
+		constexpr Type UIntToNormalized	   = { GL_UNSIGNED_INT, 1, 1 * sizeof(unsigned int), details::NORMALIZE, details::TO_FLOAT, 0 };		// uint -> float [0, 1]
+		constexpr Type UShort			   = { GL_UNSIGNED_SHORT, 1, 1 * sizeof(unsigned short), details::NO_NORMALIZE, details::TO_INT, 0 };	// ushort -> uint
+		constexpr Type UShort2			   = { GL_UNSIGNED_SHORT, 2, 2 * sizeof(unsigned short), details::NO_NORMALIZE, details::TO_INT, 0 };	// ushort[2] -> uvec2
+		constexpr Type UShort2ToFloat	   = { GL_UNSIGNED_SHORT, 2, 2 * sizeof(unsigned short), details::NO_NORMALIZE, details::TO_FLOAT, 0 }; // ushort[2] -> vec2
+		constexpr Type UShort2ToNormalized = { GL_UNSIGNED_SHORT, 2, 2 * sizeof(unsigned short), details::NORMALIZE, details::TO_FLOAT, 0 };	// ushort[2] -> vec2 [0, 1]
+		constexpr Type UShort3			   = { GL_UNSIGNED_SHORT, 3, 3 * sizeof(unsigned short), details::NO_NORMALIZE, details::TO_INT, 0 };	// ushort[3] -> uvec3
+		constexpr Type UShort3ToFloat	   = { GL_UNSIGNED_SHORT, 3, 3 * sizeof(unsigned short), details::NO_NORMALIZE, details::TO_FLOAT, 0 }; // ushort[3] -> vec3
+		constexpr Type UShort3ToNormalized = { GL_UNSIGNED_SHORT, 3, 3 * sizeof(unsigned short), details::NORMALIZE, details::TO_FLOAT, 0 };	// ushort[3] -> vec3 [0, 1]
+		constexpr Type UShort4			   = { GL_UNSIGNED_SHORT, 4, 4 * sizeof(unsigned short), details::NO_NORMALIZE, details::TO_INT, 0 };	// ushort[4] -> uvec4
+		constexpr Type UShort4ToFloat	   = { GL_UNSIGNED_SHORT, 4, 4 * sizeof(unsigned short), details::NO_NORMALIZE, details::TO_FLOAT, 0 }; // ushort[4] -> vec4
+		constexpr Type UShort4ToNormalized = { GL_UNSIGNED_SHORT, 4, 4 * sizeof(unsigned short), details::NORMALIZE, details::TO_FLOAT, 0 };	// ushort[4] -> vec4 [0, 1]
+		constexpr Type UShortToFloat	   = { GL_UNSIGNED_SHORT, 1, 1 * sizeof(unsigned short), details::NO_NORMALIZE, details::TO_FLOAT, 0 }; // ushort -> float
+		constexpr Type UShortToNormalized  = { GL_UNSIGNED_SHORT, 1, 1 * sizeof(unsigned short), details::NORMALIZE, details::TO_FLOAT, 0 };	// ushort -> float [0, 1]
+	};
+
+
+}

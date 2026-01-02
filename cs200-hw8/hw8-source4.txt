@@ -1,0 +1,2256 @@
+================================================
+FILE: source/Engine/Engine.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+
+#include "Vec2.h"
+#include <filesystem>
+#include <gsl/gsl>
+#include <memory>
+#include <string_view>
+
+namespace CS230
+{
+    class Logger;
+    class Window;
+    class Input;
+    class GameState;
+    class GameStateManager;
+    class TextureManager;
+    class Font;
+
+}
+
+namespace CS200
+{
+    class IRenderer2D;
+}
+
+class TextManager;
+class EventBus;
+class CombatSystem;
+
+/**
+ * \brief Runtime information about the window and application state
+ *
+ * WindowEnvironment provides access to essential runtime metrics and window
+ * properties that are commonly needed by game logic, rendering systems, and
+ * debugging tools. This information is updated each frame to reflect the
+ * current state of the application.
+ *
+ * Timing Information:
+ * - DeltaTime: Time elapsed since the last frame (for frame-rate independent movement)
+ * - ElapsedTime: Total time since application started (for animations and effects)
+ * - FrameCount: Total number of frames rendered (for debugging and profiling)
+ * - FPS: Current frames per second (for performance monitoring)
+ *
+ * Display Information:
+ * - DisplaySize: Current viewport dimensions in pixels (for coordinate calculations)
+ *
+ * Common use cases:
+ * - Frame-rate independent animations and movement
+ * - Performance monitoring and debugging
+ * - UI scaling based on viewport size
+ * - Time-based effects and animations
+ */
+struct WindowEnvironment
+{
+    int        FPS         = 0;   ///< Current frames per second
+    uint64_t   FrameCount  = 0;   ///< Total frames rendered since start
+    double     DeltaTime   = 0.0; ///< Time in seconds since last frame
+    double     ElapsedTime = 0.0; ///< Total time in seconds since application start
+    Math::vec2 DisplaySize{};     ///< Current viewport size in pixels
+};
+
+/**
+ * \brief Central application engine managing all core systems and subsystems
+ *
+ * Engine serves as the main application framework that coordinates all major
+ * subsystems including windowing, input handling, rendering, game state management,
+ * and resource management. It implements the singleton pattern to provide global
+ * access to these systems while maintaining proper initialization order and
+ * cleanup procedures.
+ *
+ * Architecture and Design:
+ * - Singleton pattern ensures single engine instance across the application
+ * - Pimpl idiom hides implementation details and reduces compilation dependencies
+ * - Static accessor methods provide convenient access to subsystems
+ * - Manages complete application lifecycle from startup to shutdown
+ *
+ * Core Subsystems:
+ * - Window: SDL-based window management and OpenGL context creation
+ * - Input: Keyboard, mouse, and controller input handling
+ * - Renderer2D: High-level 2D graphics rendering system
+ * - GameStateManager: State machine for different application screens/modes
+ * - TextureManager: Resource management for texture assets
+ * - Logger: Debug and event logging system
+ *
+ * Application Lifecycle:
+ * 1. Start(): Initialize all subsystems and create window
+ * 2. Update(): Process one frame of the main loop (input, logic, rendering)
+ * 3. HasGameEnded(): Check if application should terminate
+ * 4. Stop(): Clean shutdown of all subsystems
+ *
+ * The engine handles the complex initialization order required by modern
+ * graphics applications, including OpenGL context creation, ImGui setup,
+ * and proper resource management throughout the application lifecycle.
+ */
+
+class Engine
+{
+public:
+    /**
+     * \brief Get the singleton Engine instance
+     * \return Reference to the single Engine instance
+     *
+     * Provides access to the singleton Engine instance, creating it on first
+     * access using lazy initialization. This ensures the engine is available
+     * throughout the application lifetime while maintaining single-instance
+     * semantics.
+     *
+     * The singleton is implemented with a static local variable, providing
+     * thread-safe initialization in C++11 and later, and automatic cleanup
+     * when the application terminates.
+     */
+    static Engine& Instance();
+
+    /**
+     * \brief Access the application logging system
+     * \return Reference to the Logger instance for debug and event logging
+     *
+     * Provides access to the centralized logging system for debug output,
+     * error reporting, and event tracking. The logger configuration differs
+     * between development and release builds, with more verbose output
+     * available in development versions.
+     *
+     * Common uses:
+     * - Debug information and variable values
+     * - Error reporting and exception details
+     * - Performance metrics and timing information
+     * - Application lifecycle events
+     */
+    static CS230::Logger& GetLogger();
+
+    /**
+     * \brief Access the window management system
+     * \return Reference to the Window instance for display and context management
+     *
+     * Provides access to the window system that manages the application window,
+     * OpenGL context, and display properties. This includes window creation,
+     * resizing, fullscreen control, and event handling integration.
+     *
+     * Window capabilities:
+     * - Window creation and destruction
+     * - OpenGL context management
+     * - Display mode and resolution control
+     * - Event system integration
+     * - Cross-platform window handling
+     */
+    static CS230::Window& GetWindow();
+
+    /**
+     * \brief Access the input handling system
+     * \return Reference to the Input instance for keyboard, mouse, and controller input
+     *
+     * Provides access to the unified input system that handles all user input
+     * devices including keyboard, mouse, and game controllers. The system
+     * provides both immediate state queries and event-based input handling.
+     *
+     * Input capabilities:
+     * - Keyboard state and key press/release events
+     * - Mouse position, button states, and scroll wheel
+     * - Game controller support with analog and digital inputs
+     * - Input mapping and configuration
+     * - Frame-coherent input state management
+     */
+    static CS230::Input& GetInput();
+
+    /**
+     * \brief Access current window and timing environment information
+     * \return Const reference to WindowEnvironment with current frame data
+     *
+     * Provides read-only access to essential runtime information including
+     * timing data, frame statistics, and display properties. This information
+     * is updated each frame and is commonly used for frame-rate independent
+     * calculations and performance monitoring.
+     *
+     * Available information:
+     * - Delta time for frame-rate independent movement
+     * - Total elapsed time for animations and effects
+     * - Current FPS for performance monitoring
+     * - Frame count for debugging and profiling
+     * - Current viewport size for coordinate calculations
+     */
+    static const WindowEnvironment& GetWindowEnvironment();
+
+    /**
+     * \brief Access the game state management system
+     * \return Reference to GameStateManager for application state control
+     *
+     * Provides access to the state machine that manages different application
+     * modes such as menus, gameplay, pause screens, and loading states. The
+     * state manager handles transitions between states and ensures proper
+     * initialization and cleanup of state-specific resources.
+     *
+     * State management features:
+     * - State transitions with proper lifecycle management
+     * - State stack for overlay states (pause menus, dialogs)
+     * - Automatic resource management per state
+     * - Event propagation to active states
+     * - Clean separation of application logic by state
+     */
+    static CS230::GameStateManager& GetGameStateManager();
+
+    /**
+     * \brief Access the 2D rendering system
+     * \return Reference to IRenderer2D for all 2D graphics operations
+     *
+     * Provides access to the high-level 2D rendering system that abstracts
+     * OpenGL complexity and provides efficient rendering of 2D graphics
+     * primitives. The renderer handles batching, state management, and
+     * coordinate system transformations automatically.
+     *
+     * Rendering capabilities:
+     * - Sprite and texture rendering with transformations
+     * - Primitive shapes (rectangles, circles, lines)
+     * - Text rendering with font support
+     * - Efficient batch rendering for performance
+     * - Camera and viewport transformations
+     * - Blend modes and rendering effects
+     */
+    // static CS200::IRenderer2D& GetRenderer2D();
+
+    /**
+     * \brief Access the texture resource management system
+     * \return Reference to TextureManager for texture loading and caching
+     *
+     * Provides access to the texture management system that handles loading,
+     * caching, and lifecycle management of texture resources. The manager
+     * prevents duplicate loading of textures and ensures efficient GPU
+     * memory usage.
+     *
+     * Texture management features:
+     * - Automatic texture loading from various image formats
+     * - Reference counting and automatic cleanup
+     * - Texture caching to prevent duplicate resources
+     * - Efficient GPU memory management
+     * - Support for different texture formats and properties
+     */
+    static CS230::TextureManager& GetTextureManager();
+
+    static TextManager& GetTextManager();
+
+
+public:
+    /**
+     * \brief Initialize and start the engine with all subsystems
+     * \param window_title Title to display in the window title bar
+     *
+     * Performs complete engine initialization including window creation, OpenGL
+     * context setup, subsystem initialization, and resource loading. This must
+     * be called before any other engine operations and establishes the foundation
+     * for all subsequent application functionality.
+     *
+     * Initialization sequence:
+     * - Creates application window with OpenGL context
+     * - Initializes OpenGL state and rendering API
+     * - Sets up ImGui for debugging and development UI
+     * - Initializes 2D renderer and graphics systems
+     * - Configures input handling and event processing
+     * - Starts timing systems for frame rate calculation
+     *
+     * The function handles the complex dependencies between subsystems and
+     * ensures everything is properly configured before the application begins
+     * its main execution loop.
+     *
+     * Error handling:
+     * If initialization fails, the function may throw exceptions or log
+     * critical errors. The application should handle these cases appropriately.
+     */
+    void Start(std::string_view window_title);
+
+    /**
+     * \brief Shutdown the engine and clean up all resources
+     *
+     * Performs orderly shutdown of all engine subsystems, ensuring proper
+     * cleanup of resources and graceful termination. This should be called
+     * when the application is ready to exit, typically after the main loop
+     * has ended.
+     *
+     * Shutdown sequence:
+     * - Cleans up 2D renderer and graphics resources
+     * - Clears all game states and their resources
+     * - Shuts down ImGui and development tools
+     * - Releases OpenGL context and window resources
+     * - Performs final logging and cleanup
+     *
+     * The shutdown process ensures that all GPU resources are properly
+     * released and that the application can terminate cleanly without
+     * resource leaks or system instability.
+     */
+    void Stop();
+
+    /**
+     * \brief Process one frame of the application main loop
+     *
+     * Executes a complete frame cycle including input processing, game logic
+     * updates, rendering operations, and timing calculations. This function
+     * should be called repeatedly in the main application loop until the
+     * application is ready to terminate.
+     *
+     * Frame processing sequence:
+     * - Updates timing information and frame statistics
+     * - Processes window events and input state
+     * - Updates the current game state logic
+     * - Sets up rendering viewport and coordinate systems
+     * - Renders the current game state with 2D graphics
+     * - Handles ImGui rendering for development tools
+     * - Prepares for the next frame
+     *
+     * The function handles the coordination between all subsystems and
+     * ensures that each frame is processed consistently and efficiently.
+     * It also manages the rendering pipeline and coordinate system
+     * transformations automatically.
+     */
+    void Update();
+
+    /**
+     * \brief Check if the application should terminate
+     * \return True if the application should exit, false to continue running
+     *
+     * Determines whether the application main loop should continue or terminate
+     * based on window close events, user input, or game state conditions.
+     * This is typically checked after each Update() call to decide whether
+     * to continue the main loop.
+     *
+     * Termination conditions:
+     * - User closes the window (clicking X button or Alt+F4)
+     * - Game state manager signals application end
+     * - Critical errors that require application termination
+     *
+     * The function provides a clean way to check for termination conditions
+     * without requiring direct access to window or state management internals.
+     */
+    bool HasGameEnded();
+
+private:
+    // Forward declaration for Pimpl (Pointer to Implementation) idiom
+    // This hides implementation details and reduces compilation dependencies
+    class Impl;
+    gsl::owner<Impl*> impl = nullptr;
+
+private:
+    // Singleton pattern: private constructor and destructor
+    // prevent external instantiation and ensure single instance
+    Engine();
+    ~Engine();
+
+    // Internal method for updating frame timing and window environment
+    // Called each frame to maintain current runtime statistics
+    void updateEnvironment();
+};
+
+
+
+================================================
+FILE: source/Engine/Error.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+
+#include "Engine.h"
+#include "Logger.h"
+#include <filesystem>
+#include <source_location>
+#include <sstream>
+#include <utility>
+
+namespace details
+{
+    template <typename... Messages>
+    [[noreturn]] void internal_throw_report_and_throw_error(std::source_location caller_location, Messages&&... more_messages)
+    {
+        std::ostringstream error_message_stream;
+        error_message_stream << '{' << std::filesystem::path(caller_location.file_name()).filename().string() << "}(" << caller_location.line() << ") : " << caller_location.function_name() << '\n';
+        (error_message_stream << ... << std::forward<Messages>(more_messages));
+        const auto message_string = error_message_stream.str();
+        Engine::GetLogger().LogError(message_string);
+        throw std::runtime_error{ message_string };
+    }
+}
+
+template <typename M1>
+[[noreturn]] void throw_error_message(M1&& m1, std::source_location caller_location = std::source_location::current())
+{
+    details::internal_throw_report_and_throw_error(caller_location, std::forward<M1>(m1));
+}
+
+template <typename M1, typename M2>
+[[noreturn]] void throw_error_message(M1&& m1, M2&& m2, std::source_location caller_location = std::source_location::current())
+{
+    details::internal_throw_report_and_throw_error(caller_location, std::forward<M1>(m1), std::forward<M2>(m2));
+}
+
+template <typename M1, typename M2, typename M3>
+[[noreturn]] void throw_error_message(M1&& m1, M2&& m2, M3&& m3, std::source_location caller_location = std::source_location::current())
+{
+    details::internal_throw_report_and_throw_error(caller_location, std::forward<M1>(m1), std::forward<M2>(m2), std::forward<M3>(m3));
+}
+
+template <typename M1, typename M2, typename M3, typename M4>
+[[noreturn]] void throw_error_message(M1&& m1, M2&& m2, M3&& m3, M4&& m4, std::source_location caller_location = std::source_location::current())
+{
+    details::internal_throw_report_and_throw_error(caller_location, std::forward<M1>(m1), std::forward<M2>(m2), std::forward<M3>(m3), std::forward<M4>(m4));
+}
+
+template <typename M1, typename M2, typename M3, typename M4, typename M5>
+[[noreturn]] void throw_error_message(M1&& m1, M2&& m2, M3&& m3, M4&& m4, M5&& m5, std::source_location caller_location = std::source_location::current())
+{
+    details::internal_throw_report_and_throw_error(caller_location, std::forward<M1>(m1), std::forward<M2>(m2), std::forward<M3>(m3), std::forward<M4>(m4), std::forward<M5>(m5));
+}
+
+template <typename M1, typename M2, typename M3, typename M4, typename M5, typename M6>
+[[noreturn]] void throw_error_message(M1&& m1, M2&& m2, M3&& m3, M4&& m4, M5&& m5, M6&& m6, std::source_location caller_location = std::source_location::current())
+{
+    details::internal_throw_report_and_throw_error(caller_location, std::forward<M1>(m1), std::forward<M2>(m2), std::forward<M3>(m3), std::forward<M4>(m4), std::forward<M5>(m5), std::forward<M6>(m6));
+}
+
+template <typename M1, typename M2, typename M3, typename M4, typename M5, typename M6, typename M7>
+[[noreturn]] void throw_error_message(M1&& m1, M2&& m2, M3&& m3, M4&& m4, M5&& m5, M6&& m6, M7&& m7, std::source_location caller_location = std::source_location::current())
+{
+    details::internal_throw_report_and_throw_error(
+        caller_location, std::forward<M1>(m1), std::forward<M2>(m2), std::forward<M3>(m3), std::forward<M4>(m4), std::forward<M5>(m5), std::forward<M6>(m6), std::forward<M7>(m7));
+}
+
+template <typename M1, typename M2, typename M3, typename M4, typename M5, typename M6, typename M7, typename M8>
+[[noreturn]] void throw_error_message(M1&& m1, M2&& m2, M3&& m3, M4&& m4, M5&& m5, M6&& m6, M7&& m7, M8&& m8, std::source_location caller_location = std::source_location::current())
+{
+    details::internal_throw_report_and_throw_error(
+        caller_location, std::forward<M1>(m1), std::forward<M2>(m2), std::forward<M3>(m3), std::forward<M4>(m4), std::forward<M5>(m5), std::forward<M6>(m6), std::forward<M7>(m7),
+        std::forward<M8>(m8));
+}
+
+template <typename M1, typename M2, typename M3, typename M4, typename M5, typename M6, typename M7, typename M8, typename M9>
+[[noreturn]] void throw_error_message(M1&& m1, M2&& m2, M3&& m3, M4&& m4, M5&& m5, M6&& m6, M7&& m7, M8&& m8, M9&& m9, std::source_location caller_location = std::source_location::current())
+{
+    details::internal_throw_report_and_throw_error(
+        caller_location, std::forward<M1>(m1), std::forward<M2>(m2), std::forward<M3>(m3), std::forward<M4>(m4), std::forward<M5>(m5), std::forward<M6>(m6), std::forward<M7>(m7), std::forward<M8>(m8),
+        std::forward<M9>(m9));
+}
+
+template <typename M1, typename M2, typename M3, typename M4, typename M5, typename M6, typename M7, typename M8, typename M9, typename M10>
+[[noreturn]] void
+    throw_error_message(M1&& m1, M2&& m2, M3&& m3, M4&& m4, M5&& m5, M6&& m6, M7&& m7, M8&& m8, M9&& m9, M10&& m10, std::source_location caller_location = std::source_location::current())
+{
+    details::internal_throw_report_and_throw_error(
+        caller_location, std::forward<M1>(m1), std::forward<M2>(m2), std::forward<M3>(m3), std::forward<M4>(m4), std::forward<M5>(m5), std::forward<M6>(m6), std::forward<M7>(m7), std::forward<M8>(m8),
+        std::forward<M9>(m9), std::forward<M10>(m10));
+}
+
+
+
+================================================
+FILE: source/Engine/Font.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+#include "Font.h"
+
+#include "CS200/Image.h"
+#include "Engine.h"
+#include "Error.h"
+#include "Matrix.h"
+#include "Path.h"
+#include "TextureManager.h"
+#include <algorithm>
+#include <stb_image.h>
+
+/*
+ * 1. Load font texture and parse character boundaries during construction
+ * 2. Measure text dimensions for layout calculations
+ * 3. Render text to texture or directly to screen using character sprites
+ * 4. Support for colored text and transformation matrices
+ */
+namespace CS230
+{
+    Font::Font(const std::filesystem::path& file_name) : texture(file_name), image(file_name /*std::filesystem::path("Assets/Test.png")*/, is_image_flipped)
+    {
+        //  * Font Image Requirements:
+        //  * - Characters arranged horizontally in a single row
+        //  * - First pixel must be white (0xFFFFFFFF) as a format marker
+
+
+        /*[[maybe_unused]] const auto _00       = GetPixel({ 0, 0 });
+        [[maybe_unused]] const auto _00_array = CS200::ColorArray(_00);
+
+        [[maybe_unused]] const auto _10       = GetPixel({ 1, 0 });
+        [[maybe_unused]] const auto _10_array = CS200::ColorArray(_10);
+
+        [[maybe_unused]] const auto _20       = GetPixel({ 2, 0 });
+        [[maybe_unused]] const auto _20_array = CS200::ColorArray(_20);
+
+        [[maybe_unused]] const auto _30       = GetPixel({ 3, 0 });
+        [[maybe_unused]] const auto _30_array = CS200::ColorArray(_30);
+
+        [[maybe_unused]] const auto _01       = GetPixel({ 0, 1 });
+        [[maybe_unused]] const auto _01_array = CS200::ColorArray(_01);
+
+        [[maybe_unused]] const auto _11       = GetPixel({ 1, 1 });
+        [[maybe_unused]] const auto _11_array = CS200::ColorArray(_11);
+
+        [[maybe_unused]] const auto _21       = GetPixel({ 2, 1 });
+        [[maybe_unused]] const auto _21_array = CS200::ColorArray(_21);
+
+        [[maybe_unused]] const auto _31       = GetPixel({ 3, 1 });
+        [[maybe_unused]] const auto _31_array = CS200::ColorArray(_31);
+
+        [[maybe_unused]] const auto _02       = GetPixel({ 0, 2 });
+        [[maybe_unused]] const auto _02_array = CS200::ColorArray(_02);
+
+        [[maybe_unused]] const auto _12       = GetPixel({ 1, 2 });
+        [[maybe_unused]] const auto _12_array = CS200::ColorArray(_12);
+
+        [[maybe_unused]] const auto _22       = GetPixel({ 2, 2 });
+        [[maybe_unused]] const auto _22_array = CS200::ColorArray(_22);
+
+        [[maybe_unused]] const auto _32       = GetPixel({ 3, 2 });
+        [[maybe_unused]] const auto _32_array = CS200::ColorArray(_32);*/
+
+
+        if (GetPixel({ 0, 0 }) == CS200::WHITE)
+        {
+            FindCharRects();
+        }
+        else
+        {
+            Engine::GetLogger().LogError("Font " + file_name.string() + " texture has wrong format!");
+            throw std::runtime_error("Font fromat error");
+        }
+        //  * - Color changes between characters indicate boundaries
+        //  * - Characters cover ASCII range from space (' ') to 'z'
+        //  * - Image should contain exactly the expected number of characters
+        //  *
+        //  * Parsing Process:
+        //  * The constructor scans the top row of pixels to detect color changes,
+        //  * which indicate character boundaries. Each character's rectangular
+        //  * region is calculated and stored for later use during text rendering.
+        //  *
+        //  * Error Handling:
+        //  * If the font file is malformed (wrong format, missing characters, or
+        //  * incorrect structure), the constructor will throw an error to indicate
+        //  * the problem. This ensures that only valid fonts are used for rendering.
+    }
+
+    std::shared_ptr<Texture> Font::PrintToTexture(const std::string& text, CS200::RGBA color)
+    {
+        const auto&       window_environment = Engine::GetWindowEnvironment();
+        //  * Advanced Caching System:
+        //  * - Cache key: Combination of text string and color (format: "text_0xCOLOR")
+        const std::string cache_key{ text + std::string("_0x") + std::to_string(color) };
+
+        //  * - Frame tracking: Each cached texture records when it was last accessed
+        for (auto it = textures.begin(); it != textures.end();)
+        {
+            // ++(it->second.time);
+            //  * - Reference counting: Uses shared_ptr for automatic memory management
+
+            //  * - Intelligent cleanup: Removes old textures only when they have single reference and are older than 60 frames
+            if ((window_environment.FrameCount - it->second.timestamp) > 60 && it->second.texture.use_count() == 1)
+            {
+                it = textures.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+
+        //  * - Performance optimization: Eliminates redundant text rendering operations
+
+        //          * Caching Strategy:
+        //  * 1. Check cache using generated key (text + color combination)
+        //  * 2. If found: Update last-used frame timestamp and return cached texture
+        //  * 3. If not found: Create new texture, cache it, and return
+        //  * 4. Periodic cleanup: Remove textures older than 60 frames with reference count of 1
+
+        if (textures.find(cache_key) == textures.end())
+        {
+            //          * Rendering Process (for new textures):
+            //  * 1. Measure total text dimensions to determine optimal texture size
+            const Math::ivec2 text_size = MeasureText(text /*std::string("hello")*/);
+
+            //  * 2. Create render target texture using TextureManager
+            auto& texture_manager = Engine::GetTextureManager();
+            texture_manager.StartRenderTextureMode(text_size.x, text_size.y);
+            Math::TransformationMatrix matrix{};
+            for (const char c : text /*std::string("hello")*/)
+            {
+                DrawChar(matrix, c, color);
+            }
+            auto target_texture = texture_manager.EndRenderTextureMode();
+            //  * 3. Render each character from font atlas to the target texture
+
+            //  * 4. Store in cache with current frame timestamp
+            //  * 5. Return shared_ptr for client use
+
+            textures[cache_key] = { window_environment.FrameCount, target_texture };
+
+            Engine::GetLogger().LogEvent("Loading Texture: " + text);
+        }
+        else
+        {
+            textures[cache_key].timestamp = window_environment.FrameCount;
+        }
+        return textures[cache_key].texture;
+    }
+
+    void Font::FindCharRects()
+    {
+        CS200::RGBA check_color = GetPixel({ 0, 0 });
+        CS200::RGBA next_color;
+
+        int height = texture.GetSize().y;
+
+        int x = 0;
+        for (int index = 0; index < num_chars; index++)
+        {
+            int width = 0;
+
+            do
+            {
+                width++;
+                next_color = GetPixel({ x + width, 0 });
+            } while (check_color == next_color);
+
+            check_color = next_color;
+
+            char_rects[index].point_2 = { x + width , height };
+            char_rects[index].point_1 = { x, 1  }; // 1 mean ignore line above
+            x += width;
+        }
+        // stbi_image_free(image_data);
+        // image.~Image();
+    }
+
+    Math::irect& Font::GetCharRect(char c)
+    {
+        if (c >= ' ' && c <= 'z')
+        {
+            return char_rects[c - ' '];
+        }
+        else
+        {
+            Engine::GetLogger().LogError("Char '" + std::to_string(c) + "' not found");
+            return char_rects[0];
+        }
+    }
+
+    Math::ivec2 Font::MeasureText(std::string text)
+    {
+        Math::ivec2 text_size = GetCharRect(text[0]).Size();
+        for (size_t i = 1; i < text.size(); ++i)
+        {
+            text_size.x += GetCharRect(text[i]).Size().x;
+            if (GetCharRect(text[i]).Size().y > GetCharRect(text[i - 1]).Size().y)
+            {
+                text_size.y = GetCharRect(text[i]).Size().y;
+            }
+        }
+        return text_size;
+    }
+
+    void Font::DrawChar(Math::TransformationMatrix& matrix, char c, CS200::RGBA color)
+	{
+		const Math::irect& display_rect	  = GetCharRect(c);
+		const Math::ivec2  top_left_texel = { display_rect.Left(), display_rect.Bottom() };
+
+		if (c != ' ')
+		{
+			const auto flip = Math::ScaleMatrix(Math::vec2{ 1, -1 });
+			/*===================================added=====================================*/
+			const auto offset_up = Math::TranslationMatrix(Math::vec2{ 0.0, static_cast<double>(display_rect.Size().y) });
+			/*===================================added=====================================*/
+
+			texture.Draw(matrix * offset_up * flip, top_left_texel, display_rect.Size(), color);
+		}
+		matrix *= Math::TranslationMatrix(Math::ivec2{ display_rect.Size().x, 0 });
+	}
+
+    CS200::RGBA Font::GetPixel(Math::ivec2 texel) // tl is (0,0) !!
+    {
+        const CS200::RGBA* image_data = image.data();
+        const auto         image_size = image.GetSize();
+        // if (is_image_flipped)
+        //{
+        //     const int   index        = (image_size.x * image_size.y - 1) - (texel.x + texel.y * image_size.x);
+        //     CS200::RGBA return_color = CS200::rgba_to_abgr(CS200::argb_to_rgba(image_data[index])); // very weird..argb?
+
+        //    return return_color; // endian!!!
+        //}
+        // else
+        //{
+        const int   index        = texel.x + texel.y * image_size.x;
+        CS200::RGBA return_color = CS200::rgba_to_abgr(image_data[index]);
+
+        return return_color; // endian!!!
+        //}
+    }
+
+}    
+
+
+
+================================================
+FILE: source/Engine/Font.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+#pragma once
+#include "Rect.h"
+#include "Texture.h"
+#include "Vec2.h"
+#include <filesystem>
+#include <map>
+#include <memory>
+#include <string>
+#include <unordered_map>
+
+namespace CS230
+{
+    /**
+     * \brief Bitmap font system for rendering text using pre-generated font textures
+     *
+     * Font provides a lightweight and efficient text rendering system based on
+     * bitmap font textures. Rather than using complex font rasterization at runtime,
+     * this system loads pre-rendered character sets from image files and uses them
+     * to compose text strings quickly and efficiently.
+     *
+     * Bitmap Font Advantages:
+     * - Consistent visual appearance across all platforms and systems
+     * - Fast rendering performance with minimal runtime computation
+     * - Predictable memory usage and loading times
+     * - Simple integration with existing texture and rendering systems
+     * - Pixel-perfect control over character appearance and spacing
+     *
+     * Font File Format:
+     * The system expects specially formatted font textures where characters are
+     * arranged horizontally in a single row, with specific color markers to
+     * indicate character boundaries. The first pixel must be white, and color
+     * changes signal the separation between characters.
+     *
+     * Character Set:
+     * Supports ASCII characters from space (' ') to lowercase 'z', covering
+     * basic alphanumeric characters, punctuation, and symbols commonly used
+     * in game interfaces and debugging displays.
+     *
+     * Text Rendering Workflow:
+     * 1. Load font texture and parse character boundaries during construction
+     * 2. Measure text dimensions for layout calculations
+     * 3. Render text to texture or directly to screen using character sprites
+     * 4. Support for colored text and transformation matrices
+     *
+     * This font system is particularly well-suited for game development where
+     * consistent, fast text rendering is more important than dynamic font
+     * sizing or complex typography features.
+     */
+    class Font
+    {
+    public:
+        /**
+         * \brief Load and initialize a bitmap font from an image file
+         * \param file_name Path to the font texture image file
+         *
+         * Constructs a Font object by loading a specially formatted bitmap font
+         * texture and parsing the character boundary information. The constructor
+         * analyzes the font image to determine where each character begins and
+         * ends, creating a lookup table for efficient character rendering.
+         *
+         * Font Image Requirements:
+         * - Characters arranged horizontally in a single row
+         * - First pixel must be white (0xFFFFFFFF) as a format marker
+         * - Color changes between characters indicate boundaries
+         * - Characters cover ASCII range from space (' ') to 'z'
+         * - Image should contain exactly the expected number of characters
+         *
+         * Parsing Process:
+         * The constructor scans the top row of pixels to detect color changes,
+         * which indicate character boundaries. Each character's rectangular
+         * region is calculated and stored for later use during text rendering.
+         *
+         * Error Handling:
+         * If the font file is malformed (wrong format, missing characters, or
+         * incorrect structure), the constructor will throw an error to indicate
+         * the problem. This ensures that only valid fonts are used for rendering.
+         *
+         * The loaded font is immediately ready for text rendering operations
+         * and will remain valid for the lifetime of the Font object.
+         */
+        Font(const std::filesystem::path& file_name);
+
+        /**
+         * \brief Render text string to a cached texture for efficient reuse
+         * \param text String of text to render using this font
+         * \param color RGBA color value for the text (default: white)
+         * \return Shared pointer to texture containing the rendered text (cached if previously rendered)
+         *
+         * Creates or retrieves a cached texture containing the rendered text string,
+         * allowing the text to be used like any other texture in the rendering system.
+         * This approach enables text to be drawn with transformations, effects,
+         * and blending modes just like sprite graphics.
+         *
+         * Advanced Caching System:
+         * - Cache key: Combination of text string and color (format: "text_0xCOLOR")
+         * - Frame tracking: Each cached texture records when it was last accessed
+         * - Reference counting: Uses shared_ptr for automatic memory management
+         * - Intelligent cleanup: Removes old textures only when they have single reference and are older than 60 frames
+         * - Performance optimization: Eliminates redundant text rendering operations
+         *
+         * Caching Strategy:
+         * 1. Check cache using generated key (text + color combination)
+         * 2. If found: Update last-used frame timestamp and return cached texture
+         * 3. If not found: Create new texture, cache it, and return
+         * 4. Periodic cleanup: Remove textures older than 60 frames with reference count of 1
+         *
+         * Rendering Process (for new textures):
+         * 1. Measure total text dimensions to determine optimal texture size
+         * 2. Create render target texture using TextureManager
+         * 3. Render each character from font atlas to the target texture
+         * 4. Store in cache with current frame timestamp
+         * 5. Return shared_ptr for client use
+         *
+         * Memory Management Benefits:
+         * - Shared ownership: Multiple objects can reference the same text texture
+         * - Automatic cleanup: Textures are removed when no longer referenced elsewhere
+         * - Frame-based aging: Prevents immediate removal of frequently used text
+         * - Cache efficiency: Only removes textures that are truly unused
+         *
+         * Text-to-Texture Advantages:
+         * - Caching eliminates redundant text rendering for repeated strings
+         * - Supports full transformation matrices (rotation, scaling, positioning)
+         * - Enables text participation in sprite batching and effects systems
+         * - Provides consistent rendering performance regardless of text complexity
+         * - Allows text to be treated as standard texture assets
+         *
+         * Color and Formatting:
+         * The color parameter applies a tint to the entire text string while
+         * preserving original font character shapes, anti-aliasing, and spacing.
+         * Different colors of the same text are cached separately for maximum
+         * flexibility without color bleeding between cache entries.
+         */
+        std::shared_ptr<Texture> PrintToTexture(const std::string& text, CS200::RGBA color = 0xFFFFFFFF);
+
+    private:
+        void         FindCharRects();
+        Math::irect& GetCharRect(char c);
+        Math::ivec2  MeasureText(std::string text);
+        void         DrawChar(Math::TransformationMatrix& matrix, char c, CS200::RGBA color = CS200::WHITE);
+        CS200::RGBA  GetPixel(Math::ivec2 texel);
+
+
+        Texture texture;
+
+        struct TimeTexture
+        {
+            uint64_t                 timestamp{};
+            std::shared_ptr<Texture> texture{};
+        };
+
+        std::map<const std::string, TimeTexture> textures; // <key, <time stamp, texture shared_ptr>>
+        static constexpr int                     num_chars    = 'z' - ' ' + 1;
+        static constexpr int                     num_channels = 4; // rgba
+        Math::irect                              char_rects[num_chars];
+        CS200::Image                             image;
+        Math::ivec2                              dimensions;
+        static constexpr bool                    is_image_flipped = false;
+    };
+}
+
+
+
+================================================
+FILE: source/Engine/Fonts.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  Fonts.h
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    May 5, 2025
+*/
+#pragma once
+enum Fonts {
+    Simple,
+    Outlined
+};
+
+
+
+
+================================================
+FILE: source/Engine/FPS.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+
+#include <cmath>
+
+namespace util
+{
+    class FPS
+    {
+        double timeCounter = 0;
+        double numFrames   = 0;
+        double fps         = 0;
+
+    public:
+        constexpr void Update(double delta_time_seconds) noexcept
+        {
+            ++numFrames;
+            timeCounter += delta_time_seconds;
+            if (timeCounter > 1.0)
+            {
+                fps = numFrames / timeCounter;
+                timeCounter -= 1.0;
+                numFrames = 0;
+            }
+        }
+
+        operator long long() const noexcept
+        {
+            return std::llround(fps);
+        }
+
+        operator int() const noexcept
+        {
+            return static_cast<int>(std::lround(fps));
+        }
+    };
+}
+
+
+
+================================================
+FILE: source/Engine/GameObject.cpp
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  GameObject.cpp
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    April 25, 2025
+*/
+#include "GameObject.h"
+#include "GameState.h"
+#include "GameStateManager.h"
+#include "ShowCollision.h"
+
+#include <numbers>
+
+CS230::GameObject::GameObject(Math::vec2 _position) :
+    GameObject(_position, 0, { 1, 1 })
+{
+}
+
+CS230::GameObject::GameObject(Math::vec2 _position, double _rotation, Math::vec2 _scale) :
+    
+    current_state(&state_none),
+    matrix_outdated(true),
+    destroy(false),
+    position(_position),
+    velocity(Math::vec2{ 0.0,0.0 }),
+    scale(_scale),
+    rotation(_rotation)    
+{}
+
+bool CS230::GameObject::IsCollidingWith(GameObject* other_object)
+{
+    Collision* collider = GetGOComponent<Collision>();
+    return collider != nullptr && collider->IsCollidingWith(other_object);
+}
+
+bool CS230::GameObject::IsCollidingWith(Math::vec2 point)
+{
+    Collision* collider = GetGOComponent<Collision>();
+    return collider != nullptr && collider->IsCollidingWith(point);
+}
+
+
+
+bool CS230::GameObject::CanCollideWith([[maybe_unused]]GameObjectTypes other_object_type)
+{
+    return false;
+}
+
+void CS230::GameObject::Update(double dt) {
+    current_state->Update(this, dt);
+    //sprite.Update(dt);
+    if (velocity.x != 0 || velocity.y != 0) {
+        UpdatePosition(velocity * dt);
+    }
+    UpdateGOComponents(dt);
+    current_state->CheckExit(this);
+}
+
+void CS230::GameObject::change_state(State* new_state) {
+    current_state = new_state;
+    current_state->Enter(this);
+}
+
+
+void CS230::GameObject::Draw(Math::TransformationMatrix camera_matrix, unsigned int color , float depth )
+{
+    
+    Sprite* sprite = GetGOComponent<Sprite>();
+    if (sprite != nullptr) {
+
+		float real_depth;
+		if (DrawPriority() != DRAWPRIORITY)
+		{
+			real_depth = 1.f - (static_cast<float>(DrawPriority()) / 100.0f);
+			if (0.7f < real_depth)
+				real_depth = 0.7f;
+			if (0.3f > real_depth)
+				real_depth = 0.3f;
+        }
+		else
+		{
+			real_depth = depth;
+		}
+		sprite->Draw(camera_matrix * GetMatrix(), color, real_depth);
+    }
+    Collision* collision = GetGOComponent<Collision>();
+    ShowCollision* showcollision = Engine::GetGameStateManager().GetGSComponent<ShowCollision>();
+    if (showcollision != nullptr) {
+        if ((collision != nullptr) && (showcollision->Enabled() == true)) {
+            collision->Draw(camera_matrix,0.f);
+        }
+    }
+    
+}
+
+const Math::TransformationMatrix& CS230::GameObject::GetMatrix() {
+    if (matrix_outdated == true) {
+        object_matrix = Math::TranslationMatrix(position) * Math::RotationMatrix(rotation) * Math::ScaleMatrix(scale);
+        matrix_outdated = false;
+    }    
+    return object_matrix;
+}
+
+const Math::vec2& CS230::GameObject::GetPosition() const
+{
+    return position;
+}
+
+const Math::vec2& CS230::GameObject::GetVelocity() const
+{
+    return velocity;
+}
+
+const Math::vec2& CS230::GameObject::GetScale() const
+{
+    return scale;
+}
+
+double CS230::GameObject::GetRotation() const
+{
+    return rotation;
+}
+
+void CS230::GameObject::SetPosition(Math::vec2 new_position) {
+    position = new_position;
+    matrix_outdated = true;
+}
+
+void CS230::GameObject::UpdatePosition(Math::vec2 delta) {
+    position += delta;
+    matrix_outdated = true;
+}
+
+void CS230::GameObject::SetVelocity(Math::vec2 new_velocity){
+    velocity = new_velocity;
+    matrix_outdated = true;
+}
+
+void CS230::GameObject::UpdateVelocity(Math::vec2 delta)
+{
+    velocity += delta;
+    matrix_outdated = true;
+}
+
+void CS230::GameObject::SetScale(Math::vec2 new_scale)
+{
+    scale = new_scale;
+    matrix_outdated = true;
+}
+
+void CS230::GameObject::UpdateScale(Math::vec2 delta)
+{
+    scale += delta;
+    matrix_outdated = true;
+}
+
+void CS230::GameObject::SetRotation(double new_rotation)
+{
+    rotation = new_rotation;
+    matrix_outdated = true;
+}
+
+void CS230::GameObject::UpdateRotation(double delta)
+{
+    rotation += delta;
+    matrix_outdated = true;
+}
+
+
+
+
+
+================================================
+FILE: source/Engine/GameObject.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  GameObject.h
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    April 25, 2025
+*/
+
+#pragma once
+#include "../Game/GameObjectTypes.h"
+#include "ComponentManager.h"
+#include "ShowCollision.h"
+#include "Sprite.h"
+
+namespace Math
+{
+    class TransformationMatrix;
+}
+
+namespace CS230
+{
+    class Component;
+
+    class GameObject
+    {
+    public:
+        friend class Sprite;
+        GameObject(Math::vec2 position);
+        GameObject(Math::vec2 position, double rotation, Math::vec2 scale);
+
+        virtual ~GameObject()
+        {
+        }
+
+        virtual GameObjectTypes Type()     = 0;
+        virtual std::string     TypeName() = 0;
+
+		virtual int UpdatePriority() const
+		{
+			return UPDATEPRIORITY;
+		}
+
+        virtual int DrawPriority() const
+        {
+			return DRAWPRIORITY; // higher for later, upper means low depth, 30 - 70 fix
+        }
+
+        bool         IsCollidingWith(GameObject* other_object);
+        bool         IsCollidingWith(Math::vec2 point);
+        virtual bool CanCollideWith(GameObjectTypes other_object_type);
+        virtual void ResolveCollision([[maybe_unused]] GameObject* other_object) { };
+
+        virtual void Update(double dt);
+		virtual void Draw(Math::TransformationMatrix camera_matrix, unsigned int color = 0xFFFFFFFF, float depth = 0.5f);
+
+        const Math::TransformationMatrix& GetMatrix();
+        const Math::vec2&                 GetPosition() const;
+        const Math::vec2&                 GetVelocity() const;
+        const Math::vec2&                 GetScale() const;
+        double                            GetRotation() const;
+
+        template <typename T>
+        T* GetGOComponent()
+        {
+            return componentmanager.GetComponent<T>();
+        }
+
+        void SetPosition(Math::vec2 new_position);
+        void SetVelocity(Math::vec2 new_velocity);
+        void UpdateVelocity(Math::vec2 delta);
+
+        const bool& Destroyed() const
+        {
+            return destroy;
+        }
+
+        void Destroy()
+        {
+            destroy = true;
+        }
+
+		static constexpr int DRAWPRIORITY = 50;
+		static constexpr int UPDATEPRIORITY = 10;
+
+    protected:
+
+        void UpdatePosition(Math::vec2 delta);
+
+
+        void SetScale(Math::vec2 new_scale);
+        void UpdateScale(Math::vec2 delta);
+        void SetRotation(double new_rotation);
+        void UpdateRotation(double delta);
+
+        class State
+        {
+        public:
+            virtual void        Enter(GameObject* object)             = 0;
+            virtual void        Update(GameObject* object, double dt) = 0;
+            virtual void        CheckExit(GameObject* object)         = 0;
+            virtual std::string GetName()                             = 0;
+
+            virtual ~State()
+            {
+            }
+        };
+
+        State* current_state;
+        void   change_state(State* new_state);
+
+        bool matrix_outdated;
+
+        void AddGOComponent(Component* component)
+        {
+            componentmanager.AddComponent(component);
+        }
+
+        template <typename T>
+        void RemoveGOComponent()
+        {
+            componentmanager.RemoveComponent<T>();
+        }
+
+        void ClearGOComponents()
+        {
+            componentmanager.Clear();
+        }
+
+        void UpdateGOComponents(double dt)
+        {
+            componentmanager.UpdateAll(dt);
+        }
+
+
+    private:
+        bool destroy;
+
+        class State_None : public State
+        {
+        public:
+            void Enter(GameObject*) override
+            {
+            }
+
+            void Update(GameObject*, double) override
+            {
+            }
+
+            void CheckExit(GameObject*) override
+            {
+            }
+
+            std::string GetName() override
+            {
+                return "";
+            }
+
+            ~State_None()
+            {
+            }
+        };
+
+        State_None state_none;
+
+        Math::TransformationMatrix object_matrix;
+
+
+        Math::vec2 position;
+        Math::vec2 velocity;
+        Math::vec2 scale;
+        double     rotation;
+
+        ComponentManager componentmanager;
+    };
+}
+
+
+
+================================================
+FILE: source/Engine/GameObjectManager.cpp
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  GameObjectManager.cpp
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    April 25, 2025
+*/
+#include "GameObjectManager.h"
+#include "Logger.h"
+
+void CS230::GameObjectManager::Add(GameObject* object){
+	objects.push_back(object);
+}
+
+void CS230::GameObjectManager::Unload(){
+	for (GameObject* object : objects) {
+		delete object;
+	}
+	objects.clear();
+}
+
+void CS230::GameObjectManager::UpdateAll(double dt){
+	std::vector<GameObject*> destroy_objects;
+	for (GameObject* object : objects) {
+		object->Update(dt);
+		if (object->Destroyed() == true) {
+			destroy_objects.push_back(object);
+		}
+	}
+	for (GameObject* destroy_object : destroy_objects) {
+		objects.remove(destroy_object);
+		delete destroy_object;
+	}
+}
+
+void CS230::GameObjectManager::SortForUpdate()
+{
+	objects.sort([](GameObject* a, GameObject* b) { return a->UpdatePriority() < b->UpdatePriority(); });
+}
+
+void CS230::GameObjectManager::DrawAll(Math::TransformationMatrix camera_matrix){
+	for (GameObject* object : objects) {
+		object->Draw(camera_matrix);		
+	}
+}
+
+void CS230::GameObjectManager::CollisionTest()
+{
+	for (GameObject* object1 : objects) {
+		for (GameObject* object2 : objects) {
+			if (object1 != object2 && object1->CanCollideWith(object2->Type())) {
+				if (object1->IsCollidingWith(object2)) {
+					Engine::GetLogger().LogEvent("Collision Detected: " + object1->TypeName() + " and " + object2->TypeName());
+					object1->ResolveCollision(object2);
+				}
+			}
+		}
+	}
+}
+
+
+
+================================================
+FILE: source/Engine/GameObjectManager.h
+================================================
+/*
+Copyright (C) 2023 DigiPen Institute of Technology
+Reproduction or distribution of this file or its contents without
+prior written consent is prohibited
+File Name:  GameObjectManager.h
+Project:    CS230 Engine
+Author:     Taekyung Ho
+Created:    April 25, 2025
+*/
+
+#pragma once
+#include <list>
+#include "GameObject.h"
+#include "Matrix.h"
+#include "Component.h"
+
+namespace Math { class TransformationMatrix; }
+
+namespace CS230 {
+    class GameObjectManager : public CS230::Component{
+    public:
+        void Add(GameObject* object);
+        void Unload();
+
+        void UpdateAll(double dt);
+        void SortForUpdate();
+        void DrawAll(Math::TransformationMatrix camera_matrix);
+
+        void CollisionTest();
+
+        const std::list<GameObject*>& GetAll() const { return objects; }
+    private:
+        std::list<GameObject*> objects;
+    };
+}
+
+
+
+================================================
+FILE: source/Engine/GameState.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+
+#include "ComponentManager.h"
+#include <gsl/gsl>
+
+namespace CS230
+{
+    class GameState
+    {
+    public:
+        virtual void          Load()            = 0;
+        virtual void          Update(double dt) = 0;
+        virtual void          Unload()          = 0;
+        virtual void          Draw()            = 0;
+        virtual void          DrawImGui()       = 0;
+        virtual gsl::czstring GetName() const   = 0;
+        virtual ~GameState()                    = default;
+
+        template <typename T>
+        T* GetGSComponent()
+        {
+            return componentmanager.GetComponent<T>();
+        }
+
+    protected:
+        void AddGSComponent(Component* component)
+        {
+            componentmanager.AddComponent(component);
+        }
+
+        void UpdateGSComponents(double dt)
+        {
+            componentmanager.UpdateAll(dt);
+        }
+
+        template <typename T>
+        void RemoveGSComponent()
+        {
+            componentmanager.RemoveComponent<T>();
+        }
+
+        void ClearGSComponents()
+        {
+            componentmanager.Clear();
+        }
+
+    private:
+        ComponentManager componentmanager;
+    };
+
+}
+
+
+
+================================================
+FILE: source/Engine/GameStateManager.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#include "GameStateManager.h"
+#include "GameObjectManager.h"
+
+namespace CS230
+{
+    void GameStateManager::PopState()
+    {
+        using namespace std::literals;
+        auto* const state = mGameStateStack.back().get();
+        mToClear.push_back(std::move(mGameStateStack.back()));
+        mGameStateStack.erase(mGameStateStack.end() - 1);
+        Engine::GetLogger().LogEvent("Exiting state "s + state->GetName());
+        state->Unload();
+    }
+
+    void GameStateManager::Update(double dt)
+    {
+        mToClear.clear();
+        mGameStateStack.back()->Update(dt);
+        if (!mGameStateStack.empty())
+        {
+            GameObjectManager* current_gameobject_manager = mGameStateStack.back()->GetGSComponent<GameObjectManager>();
+            if (current_gameobject_manager != nullptr)
+            {
+                current_gameobject_manager->CollisionTest();
+            }
+        }
+    }
+
+    void GameStateManager::Draw()
+    {
+        for (auto& game_state : mGameStateStack)
+        {
+            game_state->Draw();
+        }
+    }
+
+    void GameStateManager::DrawImGui()
+    {
+        if (!mGameStateStack.empty())
+        {
+            mGameStateStack.back()->DrawImGui();
+        }
+    }
+
+    void GameStateManager::Clear()
+    {
+        while (!mGameStateStack.empty())
+            PopState();
+        mToClear.clear();
+    }
+
+}
+
+
+
+================================================
+FILE: source/Engine/GameStateManager.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+#pragma once
+
+#include "Engine/Engine.h"
+#include "Engine/Logger.h"
+#include "GameState.h"
+#include <memory>
+#include <vector>
+
+namespace CS230
+{
+    class GameStateManager
+    {
+    public:
+        template <typename STATE>
+        void PushState();
+        void PopState();
+        void Update(double);
+        void Draw();
+        void DrawImGui();
+
+        [[nodiscard]] bool HasGameEnded() const
+        {
+            return mGameStateStack.empty();
+        }
+
+        void Clear();
+
+        template <typename T>
+        T* GetGSComponent()
+        {
+            return mGameStateStack.back()->GetGSComponent<T>();
+        }
+
+    private:
+        std::vector<std::unique_ptr<GameState>> mGameStateStack;
+        std::vector<std::unique_ptr<GameState>> mToClear;
+    };
+
+    template <typename STATE>
+    void GameStateManager::PushState()
+    {
+        using namespace std::literals;
+        mGameStateStack.push_back(std::make_unique<STATE>());
+        const auto& state = mGameStateStack.back();
+        Engine::GetLogger().LogEvent("Entering state "s + state->GetName());
+        state->Load();
+    }
+}
+
+
+
+================================================
+FILE: source/Engine/Input.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+#include "Input.h"
+#include "Engine.h"
+#include "Logger.h"
+#include <SDL.h>
+
+namespace CS230
+{
+    Input::Input()
+    {
+        Init();
+    }
+
+    void Input::Init()
+    {
+        previousKeys.fill(false);
+        currentKeys.fill(false);
+    }
+
+    void Input::Update()
+    {
+        previousKeys = currentKeys;
+        // via SDL get keyboard state
+        // mark each keyboard that is down
+        for (Keys key = Keys::A; key < Keys::Count; ++key)
+        {
+            const auto   sdl_key        = convert_cs230_to_sdl(static_cast<Keys>(key));
+            const Uint8* keyboard_state = SDL_GetKeyboardState(nullptr);
+            SetKeyDown(key, keyboard_state[sdl_key]);
+            if (KeyJustPressed(key))
+            {
+                Engine::GetLogger().LogDebug("Key Pressed");
+            }
+            else if (KeyJustReleased(key))
+            {
+                Engine::GetLogger().LogDebug("Key Released");
+            }
+        }
+    }
+
+    bool Input::KeyDown(Input::Keys key) const
+    {
+        return currentKeys[static_cast<std::size_t>(key)];
+    }
+
+    bool Input::KeyJustReleased(Input::Keys key) const
+    {
+        const std::size_t index = static_cast<std::size_t>(key);
+        return !currentKeys[index] && previousKeys[index];
+    }
+
+    bool Input::KeyJustPressed(Input::Keys key) const
+    {
+        const std::size_t index = static_cast<std::size_t>(key);
+        return currentKeys[index] && !previousKeys[index];
+    }
+
+    void Input::SetKeyDown(Input::Keys key, bool is_pressed)
+    {
+        currentKeys[static_cast<std::size_t>(key)] = is_pressed;
+    }
+
+    SDL_Scancode convert_cs230_to_sdl(Input::Keys cs230_key)
+    {
+        switch (cs230_key)
+        {
+            case CS230::Input::Keys::A: return SDL_SCANCODE_A;
+            case CS230::Input::Keys::B: return SDL_SCANCODE_B;
+            case CS230::Input::Keys::C: return SDL_SCANCODE_C;
+            case CS230::Input::Keys::D: return SDL_SCANCODE_D;
+            case CS230::Input::Keys::E: return SDL_SCANCODE_E;
+            case CS230::Input::Keys::F: return SDL_SCANCODE_F;
+            case CS230::Input::Keys::G: return SDL_SCANCODE_G;
+            case CS230::Input::Keys::H: return SDL_SCANCODE_H;
+            case CS230::Input::Keys::I: return SDL_SCANCODE_I;
+            case CS230::Input::Keys::J: return SDL_SCANCODE_J;
+            case CS230::Input::Keys::K: return SDL_SCANCODE_K;
+            case CS230::Input::Keys::L: return SDL_SCANCODE_L;
+            case CS230::Input::Keys::M: return SDL_SCANCODE_M;
+            case CS230::Input::Keys::N: return SDL_SCANCODE_N;
+            case CS230::Input::Keys::O: return SDL_SCANCODE_O;
+            case CS230::Input::Keys::P: return SDL_SCANCODE_P;
+            case CS230::Input::Keys::Q: return SDL_SCANCODE_Q;
+            case CS230::Input::Keys::R: return SDL_SCANCODE_R;
+            case CS230::Input::Keys::S: return SDL_SCANCODE_S;
+            case CS230::Input::Keys::T: return SDL_SCANCODE_T;
+            case CS230::Input::Keys::U: return SDL_SCANCODE_U;
+            case CS230::Input::Keys::V: return SDL_SCANCODE_V;
+            case CS230::Input::Keys::W: return SDL_SCANCODE_W;
+            case CS230::Input::Keys::X: return SDL_SCANCODE_X;
+            case CS230::Input::Keys::Y: return SDL_SCANCODE_Y;
+            case CS230::Input::Keys::Z: return SDL_SCANCODE_Z;
+            case CS230::Input::Keys::Space: return SDL_SCANCODE_SPACE;
+            case CS230::Input::Keys::Enter: return SDL_SCANCODE_RETURN;
+            case CS230::Input::Keys::Left: return SDL_SCANCODE_LEFT;
+            case CS230::Input::Keys::Up: return SDL_SCANCODE_UP;
+            case CS230::Input::Keys::Right: return SDL_SCANCODE_RIGHT;
+            case CS230::Input::Keys::Down: return SDL_SCANCODE_DOWN;
+            case CS230::Input::Keys::Escape: return SDL_SCANCODE_ESCAPE;
+            case CS230::Input::Keys::Tab: return SDL_SCANCODE_TAB;
+			case CS230::Input::Keys::One: return SDL_SCANCODE_1;
+			case CS230::Input::Keys::Two: return SDL_SCANCODE_2;
+			case CS230::Input::Keys::Three: return SDL_SCANCODE_3;
+			case CS230::Input::Keys::Four: return SDL_SCANCODE_4;
+            default: return SDL_SCANCODE_UNKNOWN; // SDL's equivalent of an unknown key
+        }
+    }
+}
+
+
+
+================================================
+FILE: source/Engine/Input.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+#pragma once
+#include <SDL.h>
+#include <gsl/gsl>
+#include <vector>
+
+namespace CS230
+{
+    class Input
+    {
+    public:
+        enum class Keys
+        {
+            A,
+            B,
+            C,
+            D,
+            E,
+            F,
+            G,
+            H,
+            I,
+            J,
+            K,
+            L,
+            M,
+            N,
+            O,
+            P,
+            Q,
+            R,
+            S,
+            T,
+            U,
+            V,
+            W,
+            X,
+            Y,
+            Z,
+            Space,
+            Enter,
+            Left,
+            Up,
+            Right,
+            Down,
+            Escape,
+            Tab,
+			One,
+			Two,
+			Three,
+			Four,
+            Count
+        };
+
+        Input();
+        void Init();
+        void Update();
+
+        bool KeyDown(Keys key) const;
+        bool KeyJustReleased(Keys key) const;
+        bool KeyJustPressed(Keys key) const;
+
+    private:
+        std::array<bool, static_cast<std::size_t>(Keys::Count)> previousKeys;
+        std::array<bool, static_cast<std::size_t>(Keys::Count)> currentKeys;
+        void                                                    SetKeyDown(Keys key, bool is_pressed);
+    };
+
+    constexpr Input::Keys& operator++(Input::Keys& the_key) noexcept
+    {
+        the_key = static_cast<Input::Keys>(static_cast<unsigned>(the_key) + 1);
+        return the_key;
+    }
+
+    SDL_Scancode convert_cs230_to_sdl(Input::Keys cs230_key);
+
+    constexpr gsl::czstring to_string(Input::Keys key) noexcept
+    {
+        switch (key)
+        {
+            case Input::Keys::A: return "A";
+            case Input::Keys::B: return "B";
+            case Input::Keys::C: return "C";
+            case Input::Keys::D: return "D";
+            case Input::Keys::E: return "E";
+            case Input::Keys::F: return "F";
+            case Input::Keys::G: return "G";
+            case Input::Keys::H: return "H";
+            case Input::Keys::I: return "I";
+            case Input::Keys::J: return "J";
+            case Input::Keys::K: return "K";
+            case Input::Keys::L: return "L";
+            case Input::Keys::M: return "M";
+            case Input::Keys::N: return "N";
+            case Input::Keys::O: return "O";
+            case Input::Keys::P: return "P";
+            case Input::Keys::Q: return "Q";
+            case Input::Keys::R: return "R";
+            case Input::Keys::S: return "S";
+            case Input::Keys::T: return "T";
+            case Input::Keys::U: return "U";
+            case Input::Keys::V: return "V";
+            case Input::Keys::W: return "W";
+            case Input::Keys::X: return "X";
+            case Input::Keys::Y: return "Y";
+            case Input::Keys::Z: return "Z";
+            case Input::Keys::Space: return "Space";
+            case Input::Keys::Enter: return "Enter";
+            case Input::Keys::Left: return "Left";
+            case Input::Keys::Up: return "Up";
+            case Input::Keys::Right: return "Right";
+            case Input::Keys::Down: return "Down";
+            case Input::Keys::Escape: return "Escape";
+            case Input::Keys::Tab: return "Tab";
+			case Input::Keys::One: return "One";
+			case Input::Keys::Two: return "Two";
+			case Input::Keys::Three: return "Three";
+			case Input::Keys::Four: return "Four";
+            case Input::Keys::Count: return "Count";
+        }
+        return "Unknown";
+    }
+}
+
+
+
+================================================
+FILE: source/Engine/Logger.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+#include "Logger.h"
+#include <iostream>
+
+namespace CS230
+{
+    Logger::Logger(Severity severity, bool use_console, std::chrono::system_clock::time_point _start_time) : min_level(severity), out_stream("Trace.log"), start_time(_start_time)
+    {
+        if (use_console == true)
+        {
+            out_stream.basic_ios<char>::rdbuf(std::cout.rdbuf());
+            ;
+        }
+    }
+
+    void Logger::LogError(std::string text)
+    {
+        log(Severity::Error, text);
+    }
+
+    void Logger::LogEvent(std::string text)
+    {
+        log(Severity::Event, text);
+    }
+
+    void Logger::LogDebug(std::string text)
+    {
+        log(Severity::Debug, text);
+    }
+
+    void Logger::LogVerbose(std::string text)
+    {
+        log(Severity::Verbose, text);
+    }
+
+    void Logger::log(Severity severity, std::string message)
+    {
+        std::map<CS230::Logger::Severity, std::string> get_error_level = {
+            { CS230::Logger::Severity::Verbose, "Verbose" },
+            {   CS230::Logger::Severity::Debug,   "Debug" },
+            {   CS230::Logger::Severity::Event,   "Event" },
+            {   CS230::Logger::Severity::Error,   "Error" }
+        };
+        std::string answer = get_error_level[severity] + "\t" + message;
+        //===========map_version
+
+
+        if (int(CS230::Logger::min_level) <= int(severity))
+        {
+            out_stream.precision(4);
+            out_stream << '[' << std::fixed << seconds_since_start() << "]\t";
+            out_stream << answer << "\n";
+        }
+        return;
+    }
+
+    double Logger::seconds_since_start()
+    {
+        return std::chrono::duration<double>(std::chrono::system_clock::now() -start_time).count();
+    }
+
+    // note the proper way to redirect the rdbuf is `stream.basic_ios<char>::rdbuf(other_stream.rdbuf());`
+    // note that we don't need a destructor ~Logger() if all we are doing is closing the streams. The std stream classes impl Rule of 5 and will auto flush & close themselves
+}
+
+
+
+================================================
+FILE: source/Engine/Logger.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \author Taekyung Ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+#pragma once
+#include <chrono>
+#include <fstream>
+#include <map>
+#include <string>
+
+namespace CS230
+{
+    class Logger
+    {
+    public:
+        enum class Severity
+        {
+            Verbose, // Minor messages
+            Debug,   // Only used while actively debugging
+            Event,   // General event, like key press or state change
+            Error    // Errors, such as file load errors
+        };
+        Logger(Severity severity, bool use_console, std::chrono::system_clock::time_point start_time);
+
+        void LogError(std::string text);
+
+        void LogEvent(std::string text);
+
+        void LogDebug(std::string text);
+
+        void LogVerbose(std::string text);
+
+    private:
+        Severity                              min_level;
+        std::ofstream                         out_stream;
+        std::chrono::system_clock::time_point start_time;
+        void                                  log(Severity severity, std::string message);
+        double                                seconds_since_start();
+    };
+}
+
+
+
+================================================
+FILE: source/Engine/Matrix.cpp
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \author Taekyung ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+#include "Matrix.h"
+#include <cmath>
+
+namespace Math
+{
+    TransformationMatrix::TransformationMatrix()
+    {
+        Reset();
+    }
+
+    double* TransformationMatrix::operator[](int index)
+    {
+        return const_cast<double*>((static_cast<TransformationMatrix const&>(*this))[index]);
+    }
+
+    const double* TransformationMatrix::operator[](int index) const
+    {
+        return matrix[index];
+    }
+
+    TransformationMatrix TransformationMatrix::operator*(TransformationMatrix m) const
+    {
+        TransformationMatrix result;
+
+        result.matrix[0][0] = matrix[0][0] * m[0][0] + matrix[0][1] * m[1][0] + matrix[0][2] * m[2][0];
+        result.matrix[0][1] = matrix[0][0] * m[0][1] + matrix[0][1] * m[1][1] + matrix[0][2] * m[2][1];
+        result.matrix[0][2] = matrix[0][0] * m[0][2] + matrix[0][1] * m[1][2] + matrix[0][2] * m[2][2];
+        result.matrix[1][0] = matrix[1][0] * m[0][0] + matrix[1][1] * m[1][0] + matrix[1][2] * m[2][0];
+        result.matrix[1][1] = matrix[1][0] * m[0][1] + matrix[1][1] * m[1][1] + matrix[1][2] * m[2][1];
+        result.matrix[1][2] = matrix[1][0] * m[0][2] + matrix[1][1] * m[1][2] + matrix[1][2] * m[2][2];
+        result.matrix[2][0] = matrix[2][0] * m[0][0] + matrix[2][1] * m[1][0] + matrix[2][2] * m[2][0];
+        result.matrix[2][1] = matrix[2][0] * m[0][1] + matrix[2][1] * m[1][1] + matrix[2][2] * m[2][1];
+        result.matrix[2][2] = matrix[2][0] * m[0][2] + matrix[2][1] * m[1][2] + matrix[2][2] * m[2][2];
+
+        return result;
+    }
+
+	TransformationMatrix TransformationMatrix::Inverse() const
+	{
+        TransformationMatrix inv;
+
+        const double m00 = matrix[0][0]; const double m01 = matrix[0][1]; const double m02 = matrix[0][2];
+        const double m10 = matrix[1][0]; const double m11 = matrix[1][1]; const double m12 = matrix[1][2];
+        const double m20 = matrix[2][0]; const double m21 = matrix[2][1]; const double m22 = matrix[2][2];
+
+        double det = m00 * (m11 * m22 - m12 * m21) 
+                   - m01 * (m10 * m22 - m12 * m20) 
+                   + m02 * (m10 * m21 - m11 * m20);
+
+        if (std::abs(det) < 1e-5) 
+        {
+            inv.Reset(); 
+            return inv;
+        }
+
+        double invDet = 1.0 / det;
+		// Row 0
+        inv[0][0] =  (m11 * m22 - m12 * m21) * invDet;
+        inv[0][1] = -(m01 * m22 - m02 * m21) * invDet; // Transposed indices (0,1 -> cofactor of 1,0)
+        inv[0][2] =  (m01 * m12 - m02 * m11) * invDet; 
+
+        // Row 1
+        inv[1][0] = -(m10 * m22 - m12 * m20) * invDet;
+        inv[1][1] =  (m00 * m22 - m02 * m20) * invDet;
+        inv[1][2] = -(m00 * m12 - m02 * m10) * invDet;
+
+        // Row 2
+        inv[2][0] =  (m10 * m21 - m11 * m20) * invDet;
+        inv[2][1] = -(m00 * m21 - m01 * m20) * invDet;
+        inv[2][2] =  (m00 * m11 - m01 * m10) * invDet;
+
+        return inv;
+	}
+
+
+	TransformationMatrix& TransformationMatrix::operator*=(TransformationMatrix m)
+    {
+        (*this) = (*this) * m;
+        return (*this);
+    }
+
+    vec2 TransformationMatrix::operator*(vec2 v) const
+    {
+        Math::vec2 result;
+        result.x = matrix[0][0] * v.x + matrix[0][1] * v.y + matrix[0][2];
+        result.y = matrix[1][0] * v.x + matrix[1][1] * v.y + matrix[1][2];
+        return result;
+    }
+
+    vec3 TransformationMatrix::operator*(vec3 v) const
+    {
+        Math::vec3 result;
+        result.x = matrix[0][0] * v.x + matrix[0][1] * v.y + matrix[0][2] * v.x;
+        result.y = matrix[1][0] * v.x + matrix[1][1] * v.y + matrix[1][2] * v.z;
+        return result;
+    }
+
+    void TransformationMatrix::Reset()
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            for (int j = 0; j < 3; j++)
+            {
+                matrix[i][j] = 0;
+            }
+        }
+        matrix[0][0] = 1.0;
+        matrix[1][1] = 1.0;
+        matrix[2][2] = 1.0;
+    }
+
+    TranslationMatrix::TranslationMatrix(ivec2 translate)
+    {
+        Reset();
+        matrix[0][2] = translate.x;
+        matrix[1][2] = translate.y;
+    }
+
+    TranslationMatrix::TranslationMatrix(vec2 translate)
+    {
+        Reset();
+        matrix[0][2] = translate.x;
+        matrix[1][2] = translate.y;
+    }
+
+    RotationMatrix::RotationMatrix(double theta)
+    {
+        Reset();
+        matrix[0][0] = std::cos(theta);
+        matrix[0][1] = -std::sin(theta);
+        matrix[1][0] = std::sin(theta);
+        matrix[1][1] = std::cos(theta);
+    }
+
+    ScaleMatrix::ScaleMatrix(double scale)
+    {
+        Reset();
+        matrix[0][0] *= scale;
+        matrix[1][1] *= scale;
+    }
+
+    ScaleMatrix::ScaleMatrix(vec2 scale)
+    {
+        Reset();
+        matrix[0][0] *= scale.x;
+        matrix[1][1] *= scale.y;
+    }
+}
+
+
+
+================================================
+FILE: source/Engine/Matrix.h
+================================================
+/**
+ * \file
+ * \author Rudy Castan
+ * \author Jonathan Holmes
+ * \author Taekyung ho
+ * \date 2025 Fall
+ * \par CS200 Computer Graphics I
+ * \copyright DigiPen Institute of Technology
+ */
+
+#pragma once
+#include "Vec2.h"
+
+namespace Math
+{
+	class TransformationMatrix
+	{
+	public:
+		TransformationMatrix();
+
+		double* operator[](int index);
+
+		const double* operator[](int index) const;
+
+		TransformationMatrix operator*(TransformationMatrix m) const;
+		TransformationMatrix Inverse() const;
+
+		TransformationMatrix& operator*=(TransformationMatrix m);
+		vec2				  operator*(vec2 v) const;
+		vec3				  operator*(vec3 v) const;
+		void				  Reset();
+
+
+	protected:
+		double matrix[3][3];
+	};
+
+	class TranslationMatrix : public TransformationMatrix
+	{
+	public:
+		TranslationMatrix(ivec2 translate);
+		TranslationMatrix(vec2 translate);
+	};
+
+	class RotationMatrix : public TransformationMatrix
+	{
+	public:
+		RotationMatrix(double theta);
+	};
+
+	class ScaleMatrix : public TransformationMatrix
+	{
+	public:
+		ScaleMatrix(double scale);
+		ScaleMatrix(vec2 scale);
+	};
+
+	inline static bool IsIdentityMatrix(const Math::TransformationMatrix& mat)
+	{
+		return mat[0][0] == 1.0 && mat[0][1] == 0.0 && mat[0][2] == 0.0 && mat[1][0] == 0.0 && mat[1][1] == 1.0 && mat[1][2] == 0.0 && mat[2][0] == 0.0 && mat[2][1] == 0.0 && mat[2][2] == 1.0;
+	}
+}
+
+
+
